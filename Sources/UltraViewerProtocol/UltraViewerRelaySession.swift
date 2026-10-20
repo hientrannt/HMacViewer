@@ -149,6 +149,10 @@ public actor UltraViewerRelaySession {
     private var events: AsyncThrowingStream<Event, any Swift.Error>.Continuation?
     private var latestFrame = LatestScreenFrame()
     private var renderer: ModernScreenRenderer?
+    /// Every renderer access goes through this serial queue. Screen updates are
+    /// decoded here off the actor, so input sent meanwhile is not held behind
+    /// decompression; other uses wait synchronously for the decode in flight.
+    private let rendererQueue = DispatchQueue(label: "MacViewer.screenDecode", qos: .userInitiated)
     private var registrationReply: ClientRegistration.Reply?
     private var peerInfo: PeerLookup.PeerInfo?
     private var targetAddress: RelayIPv4Address?
@@ -758,7 +762,7 @@ public actor UltraViewerRelaySession {
             if geometryChanged {
                 let fresh = try ModernScreenRenderer(width: initialization.width, height: initialization.height,
                     tileSize: initialization.tileSize, displayColors: 2,
-                    lastFrameNumber: upgradingID == nil ? (renderer?.lastFrameNumber ?? ModernScreenRenderer.resetFrameNumber) : ModernScreenRenderer.resetFrameNumber,
+                    lastFrameNumber: upgradingID == nil ? (rendererQueue.sync { [renderer] in renderer?.lastFrameNumber } ?? ModernScreenRenderer.resetFrameNumber) : ModernScreenRenderer.resetFrameNumber,
                     dictionary: UltraViewerScreenDictionary.load())
                 if let upgradingID {
                     guard directState.selectInitialized(upgradingID) else { return }
@@ -770,7 +774,8 @@ public actor UltraViewerRelaySession {
                 }
                 renderer = fresh
             } else {
-                try renderer?.setTileSize(parts: [Data([48]), Data([UInt8(initialization.tileSize)])])
+                let current = renderer
+                try rendererQueue.sync { try current?.setTileSize(parts: [Data([48]), Data([UInt8(initialization.tileSize)])]) }
             }
             phase = .active
             deadline?.cancel()
@@ -818,10 +823,11 @@ public actor UltraViewerRelaySession {
         case 1:
             guard phase == .active, let renderer else { return }
             diagnostics.screenPayloadBytes += UInt64(payload.count)
-            let decodingStarted = DispatchTime.now().uptimeNanoseconds
             do {
-                let bitmap = try renderer.apply(ModernScreenFrameMessage.decode(parts: parts))
-                let elapsed = DispatchTime.now().uptimeNanoseconds - decodingStarted
+                let (bitmap, elapsed) = try await decodeOffActor(parts, with: renderer)
+                // The actor was free while decoding; drop the result if a
+                // refresh, reinitialization or close replaced this renderer.
+                guard token == generation, phase == .active, self.renderer === renderer else { return }
                 diagnostics.decodeNanoseconds += elapsed
                 diagnostics.maximumDecodeNanoseconds = max(diagnostics.maximumDecodeNanoseconds, elapsed)
                 diagnostics.decodedFrames += 1
@@ -830,6 +836,7 @@ public actor UltraViewerRelaySession {
                 // cannot acknowledge a growing queue of stale screen updates.
                 try await sendToPeer(Data("18".utf8))
             } catch let error as ModernScreenMessageError {
+                guard token == generation, phase == .active, self.renderer === renderer else { return }
                 diagnostics.lastScreenFailure = String(describing: error)
                 try await sendToPeer(Data("18".utf8))
                 // A malformed drawing mission must not immediately tear down an
@@ -862,7 +869,10 @@ public actor UltraViewerRelaySession {
         case 27, 41, 54: throw Failure.closed
         case 39: throw Failure.partnerBlocked
         case 48:
-            if phase == .active { try renderer?.setTileSize(parts: parts) }
+            if phase == .active {
+                let current = renderer
+                try rendererQueue.sync { try current?.setTileSize(parts: parts) }
+            }
         case 49:
             guard parts.count > 1, let value = parts[1].first else {
                 throw Failure.malformedInitialization
@@ -873,6 +883,23 @@ public actor UltraViewerRelaySession {
             guard canUseSessionTools, let message = FileTransferMessage.decodeHostParts(parts) else { return }
             try await applyFileUpdate(files.consume(message))
         default: break
+        }
+    }
+
+    /// Decodes one screen update on `rendererQueue`, returning the bitmap and decode time.
+    private func decodeOffActor(_ parts: [Data], with renderer: ModernScreenRenderer)
+        async throws -> (ModernScreenBitmap, UInt64) {
+        let box = RendererBox(renderer: renderer)
+        return try await withCheckedThrowingContinuation { continuation in
+            rendererQueue.async {
+                let started = DispatchTime.now().uptimeNanoseconds
+                do {
+                    let bitmap = try box.renderer.apply(ModernScreenFrameMessage.decode(parts: parts))
+                    continuation.resume(returning: (bitmap, DispatchTime.now().uptimeNanoseconds - started))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
         }
     }
 
@@ -1135,4 +1162,9 @@ public actor UltraViewerRelaySession {
         guard values.count == 3, values.allSatisfy({ $0 >= 0 }) else { return false }
         return !values.lexicographicallyPrecedes(required)
     }
+}
+
+/// Hands the renderer to `rendererQueue`, the only place it is used while a decode may be running.
+private struct RendererBox: @unchecked Sendable {
+    let renderer: ModernScreenRenderer
 }
