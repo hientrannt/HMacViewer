@@ -190,9 +190,11 @@ final class MCPSocketServer: @unchecked Sendable {
 
     private func closeConnection(_ id: ConnectionID, notify: Bool) {
         guard let connection = connections.removeValue(forKey: id) else { return }
+        // Close only after the source is unregistered (its cancel handler) and
+        // pending writes have drained, so a reused fd number can't be misrouted.
+        let fd = connection.fd, writer = connection.writer
+        connection.source.setCancelHandler { writer.async { close(fd) } }
         connection.source.cancel()
-        let fd = connection.fd
-        connection.writer.async { close(fd) }
         if notify { onClose?(id) }
     }
 }
