@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>HMacViewer</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1FD1C9"/>
+      <stop offset="1" stop-color="#4B3FD6"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#bg)"/>
+  <!-- Monitor -->
+  <rect x="170" y="230" width="684" height="450" rx="40" fill="#FFFFFF" fill-opacity="0.14" stroke="#FFFFFF" stroke-width="36"/>
+  <rect x="470" y="680" width="84" height="84" fill="#FFFFFF"/>
+  <rect x="360" y="752" width="304" height="40" rx="20" fill="#FFFFFF"/>
+  <!-- H -->
+  <rect x="380" y="330" width="72" height="250" rx="12" fill="#FFFFFF"/>
+  <rect x="572" y="330" width="72" height="250" rx="12" fill="#FFFFFF"/>
+  <rect x="440" y="422" width="144" height="64" fill="#FFFFFF"/>
+  <!-- Remote pointer -->
+  <path d="M664 500 L664 668 L706 628 L736 698 L768 684 L738 616 L796 616 Z" fill="#FFFFFF" stroke="#3B33B8" stroke-width="16" stroke-linejoin="round"/>
+</svg>
