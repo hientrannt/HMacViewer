@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)build, e.g. v0.3.0"
+        description: "Release tag, e.g. v1.0.0. Built from the selected branch; the tag is created if missing."
         required: true
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Select Xcode
@@ -157,10 +157,10 @@ jobs:
         run: |
           # Commit subjects since the previous tag. The app's update window shows
           # this "What's new" section and skips "Install".
-          previous="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          previous="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
           {
             echo "## What's new"
-            git log --no-merges --format='- %s' ${previous:+"$previous.."}"$TAG"
+            git log --no-merges --format='- %s' ${previous:+"$previous.."}HEAD
             echo
             echo "## Install"
             echo "1. Download **HMacViewer.dmg**, open it and drag HMacViewer into Applications."
@@ -173,6 +173,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
           name: HMacViewer ${{ env.VERSION }}
           prerelease: ${{ env.PRERELEASE }}
           generate_release_notes: true
@@ -190,6 +191,7 @@ jobs:
 
   linux-release:
     name: Build & publish LinuxViewer
+    needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -199,7 +201,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Resolve version
@@ -231,6 +233,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
           prerelease: ${{ env.PRERELEASE }}
           fail_on_unmatched_files: true
           files: |
