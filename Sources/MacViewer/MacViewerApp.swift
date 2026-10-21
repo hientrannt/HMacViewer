@@ -27,7 +27,6 @@ struct MacViewerApp: App {
                     applicationDelegate.model = model
                     applicationDelegate.hosting = hosting
                     applicationDelegate.agents = agents
-                    updater.startAutomaticChecks()
                     agents.start()
                 }
                 .appLanguage()
@@ -37,7 +36,6 @@ struct MacViewerApp: App {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .appInfo) {
                 Button(L("About MacViewer")) { MacViewerAbout.show() }
-                Button(L("Check for Updates…")) { updater.check(userInitiated: true) }
             }
             RemoteSessionCommands(model: model)
             CommandMenu(L("Connection")) {
@@ -70,7 +68,6 @@ struct MacViewerSettings: View {
     @AppStorage("MacViewer.smoothScreen") private var smoothScreen = true
     @AppStorage("MacViewer.scrollSensitivity") private var scrollSensitivity = 1.0
     @AppStorage(AppLanguage.defaultsKey) private var language = AppLanguage.system.rawValue
-    @AppStorage(UpdateChecker.automaticKey) private var checkForUpdates = true
     @AppStorage(SessionToolsModel.shareClipboardKey) private var shareClipboard = false
     @AppStorage(MacRegistrationProfile.displayNameKey) private var displayName = ""
     @AppStorage(ReceivedFilesFolder.key) private var receivedFolder = ""
@@ -186,15 +183,8 @@ struct MacViewerSettings: View {
             Section(header: Text("About")) {
                 LabeledRow("Application", value: "HMacViewer \(Self.version)")
                 LabeledRow("Author", value: MacViewerAbout.author)
-                Link("github.com/hientrannt/HMacViewer", destination: MacViewerAbout.repository)
-                Link(L("Based on MacViewer by DeanOpen"), destination: MacViewerAbout.upstream)
-                Link("UltraViewer (ultraviewer.net)", destination: MacViewerAbout.ultraViewer)
-                Toggle("Automatically check for updates", isOn: $checkForUpdates)
-                Button(L("Check for Updates…")) { updater.check(userInitiated: true) }
-                    .disabled(updater.state == .checking)
-                Text("An independent native Mac app for UltraViewer interoperability.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                LabeledRow("Email", value: MacViewerAbout.email)
+                LabeledRow("Phone", value: MacViewerAbout.phone)
             }
         }
         .groupedForm()
@@ -285,12 +275,11 @@ final class MacViewerAppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Standard About panel with the author and a link to the project.
+/// Standard About panel with the author's contact details.
 enum MacViewerAbout {
-    static let author = "hientrannt"
-    static let repository = URL(string: "https://github.com/hientrannt/HMacViewer")!
-    static let upstream = URL(string: "https://github.com/DeanOpen/MacViewer")!
-    static let ultraViewer = URL(string: "https://ultraviewer.net")!
+    static let author = "Trần Ngọc Hiện"
+    static let email = "hiendhg@gmail.com"
+    static let phone = "0796868079"
 
     @MainActor
     static func show() {
@@ -299,15 +288,8 @@ enum MacViewerAbout {
         let body: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: paragraph,
         ]
-        let credits = NSMutableAttributedString(string: L("Made by") + " \(author)\n", attributes: body)
-        var link = body
-        link[.link] = repository
-        link[.foregroundColor] = NSColor.linkColor
-        credits.append(NSAttributedString(string: "github.com/hientrannt/HMacViewer", attributes: link))
-        credits.append(NSAttributedString(string: "\n" + L("Based on MacViewer by DeanOpen"), attributes: body))
-        credits.append(NSAttributedString(string: "\n\n" + L("Works with") + " ", attributes: body))
-        link[.link] = ultraViewer
-        credits.append(NSAttributedString(string: "UltraViewer", attributes: link))
+        let credits = NSAttributedString(string: L("Made by") + " \(author)\n" + L("Email") + ": \(email)\n"
+            + L("Phone") + ": \(phone)", attributes: body)
         NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
         NSApp.activateApp()
     }

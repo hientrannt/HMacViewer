@@ -49,6 +49,8 @@ for language in en vi; do
   cp "Sources/MacViewer/Resources/$language.lproj/Localizable.strings" "$app_directory/Contents/Resources/$language.lproj/Localizable.strings"
 done
 cp -R "$binary_directory/MacViewer_MacViewer.bundle" "$app_directory/Contents/Resources/"
+mkdir -p "$app_directory/Contents/Resources/Licenses/MacViewer"
+cp LICENSE "$app_directory/Contents/Resources/Licenses/MacViewer/LICENSE"
 mkdir -p "$app_directory/Contents/Resources/Licenses/Zstandard"
 cp ThirdParty/zstd/LICENSE "$app_directory/Contents/Resources/Licenses/Zstandard/LICENSE"
 cp ThirdParty/zstd/COPYING "$app_directory/Contents/Resources/Licenses/Zstandard/COPYING"
