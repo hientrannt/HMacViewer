@@ -15,6 +15,11 @@
     <string name="view_only">The other computer allows viewing only.</string>
     <string name="session_ended">Session ended</string>
     <string name="ok">OK</string>
-    <string name="help">Tap: click · Long press: right click · Drag: drag · Two fingers: scroll, pinch to zoom</string>
     <string name="author">Trần Ngọc Hiện · hiendhg@gmail.com · 0796868079</string>
+    <string name="mode_touchpad">Touchpad</string>
+    <string name="mode_direct">Direct touch</string>
+    <string name="zoom">Zoom</string>
+    <string name="quality_fast">Fast</string>
+    <string name="quality_sharp">Sharp</string>
+    <string name="help">Touchpad: slide to move the cursor, tap to click, two-finger tap for right click, hold then slide to drag · Two fingers: scroll, pinch to zoom</string>
 </resources>
