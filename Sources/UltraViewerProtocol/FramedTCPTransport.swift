@@ -187,6 +187,7 @@ public actor FramedTCPTransport {
         var error: CFError?
         if SecTrustEvaluateWithError(trust, &error) { return true }
         let firstReason = error.map(reasonText)
+        #if os(macOS)
         guard SecTrustSetOptions(trust, [.allowExpired, .allowExpiredRoot]) == errSecSuccess else {
             if UserDefaults.standard.bool(forKey: skipCertificateCheckKey) { return true }
             rejection.reason = firstReason
@@ -194,6 +195,15 @@ public actor FramedTCPTransport {
         }
         error = nil
         if SecTrustEvaluateWithError(trust, &error) { return true }
+        #else
+        // iOS has no allowExpired option: evaluate as of earlier dates instead,
+        // which accepts a chain that was valid within the last two years.
+        for days in [30.0, 180, 365, 730] {
+            error = nil
+            guard SecTrustSetVerifyDate(trust, Date(timeIntervalSinceNow: -days * 86_400) as CFDate) == errSecSuccess else { break }
+            if SecTrustEvaluateWithError(trust, &error) { return true }
+        }
+        #endif
         if UserDefaults.standard.bool(forKey: skipCertificateCheckKey) { return true }
         rejection.reason = error.map(reasonText) ?? firstReason
         return false

@@ -189,6 +189,7 @@ jobs:
       - name: Build for iOS Simulator
         working-directory: iOSViewer
         run: |
+          set -o pipefail
           xcodebuild -project HMacViewer.xcodeproj -scheme HMacViewer \
             -destination "generic/platform=iOS Simulator" -configuration Release \
             CODE_SIGNING_ALLOWED=NO build 2>&1 | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" | grep -v "^ld: warning" | tail -60
