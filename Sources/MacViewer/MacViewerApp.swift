@@ -66,6 +66,7 @@ struct MacViewerSettings: View {
     @State private var confirmMasterPasswordRemoval = false
     @AppStorage(ConnectionModel.rememberPartnersKey) private var rememberPartners = true
     @AppStorage("MacViewer.smoothScreen") private var smoothScreen = true
+    @AppStorage(ConnectionView.autoFullScreenKey) private var autoFullScreen = true
     @AppStorage("MacViewer.scrollSensitivity") private var scrollSensitivity = 1.0
     @AppStorage(AppLanguage.defaultsKey) private var language = AppLanguage.system.rawValue
     @AppStorage(SessionToolsModel.shareClipboardKey) private var shareClipboard = false
@@ -163,6 +164,7 @@ struct MacViewerSettings: View {
                     .font(.caption).foregroundColor(.secondary)
             }
             Section(header: Text("Remote screen")) {
+                Toggle("Full screen when viewing another computer", isOn: $autoFullScreen)
                 Toggle("Smooth image scaling", isOn: $smoothScreen)
                 Slider(value: $scrollSensitivity, in: 0.25...2, step: 0.25) {
                     Text("Scroll speed")
