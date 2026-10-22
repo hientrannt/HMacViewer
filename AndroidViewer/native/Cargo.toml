@@ -1,0 +1,19 @@
+[package]
+name = "hmacviewer-android"
+version = "0.1.0"
+edition = "2021"
+description = "JNI bridge between the HMacViewer Android app and the LinuxViewer protocol core"
+license = "MIT"
+publish = false
+
+[lib]
+name = "hmacviewer"
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = { version = "0.21", default-features = false }
+linuxviewer = { path = "../../LinuxViewer", default-features = false }
+
+[profile.release]
+lto = "thin"
+strip = true

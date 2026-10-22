@@ -3,9 +3,6 @@
 //! The decoder is the SpanDSP/WebRTC 64 kbit/s G.722 decoder from
 //! ThirdParty/g722, with NAudio's wrapping (not saturating) final QMF output.
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-
 pub const MAX_ENCODED_PACKET: usize = 64 * 1024;
 pub const MAX_PCM_PACKET: usize = MAX_ENCODED_PACKET * 4;
 
@@ -228,74 +225,83 @@ impl G722Decoder {
     }
 }
 
-/// Interleaved 48 kHz stereo i16 playback through the default output device.
-/// Keeps at most 250 ms queued, dropping the oldest audio beyond that.
-pub struct Player {
-    queue: Arc<Mutex<VecDeque<i16>>>,
-    _stream: cpal::Stream,
-}
+#[cfg(feature = "desktop")]
+pub use player::Player;
 
-const SOURCE_RATE: u32 = 48_000;
-const MAX_QUEUED: usize = 12_000 * 2;
+#[cfg(feature = "desktop")]
+mod player {
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
 
-impl Player {
-    pub fn new() -> Result<Self, String> {
-        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-        let host = cpal::default_host();
-        let device = host.default_output_device().ok_or("No audio output device.")?;
-        let config = device.default_output_config().map_err(|e| e.to_string())?;
-        let channels = config.channels() as usize;
-        let rate = config.sample_rate().0;
-        let queue: Arc<Mutex<VecDeque<i16>>> = Arc::default();
-        let q = queue.clone();
-        // Nearest-sample resampling from 48 kHz stereo to the device format.
-        let mut phase = 0f64;
-        let step = SOURCE_RATE as f64 / rate as f64;
-        let mut frame = [0i16; 2];
-        let mut fill = move |out: &mut dyn FnMut(usize, f32), frames: usize| {
-            let mut q = q.lock().unwrap();
-            for f in 0..frames {
-                phase += step;
-                while phase >= 1.0 {
-                    phase -= 1.0;
-                    if q.len() >= 2 {
-                        frame = [q.pop_front().unwrap(), q.pop_front().unwrap()];
-                    } else {
-                        frame = [0, 0];
-                    }
-                }
-                for c in 0..channels {
-                    let s = if channels == 1 { (frame[0] as f32 + frame[1] as f32) / 2.0 } else { frame[c.min(1)] as f32 };
-                    out(f * channels + c, s / 32768.0);
-                }
-            }
-        };
-        let err = |e| eprintln!("linuxviewer: audio: {e}");
-        let cfg: cpal::StreamConfig = config.config();
-        let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => device.build_output_stream(&cfg, move |d: &mut [f32], _| {
-                let n = d.len() / channels;
-                fill(&mut |i, v| d[i] = v, n);
-            }, err, None),
-            cpal::SampleFormat::I16 => device.build_output_stream(&cfg, move |d: &mut [i16], _| {
-                let n = d.len() / channels;
-                fill(&mut |i, v| d[i] = (v * 32767.0) as i16, n);
-            }, err, None),
-            cpal::SampleFormat::U16 => device.build_output_stream(&cfg, move |d: &mut [u16], _| {
-                let n = d.len() / channels;
-                fill(&mut |i, v| d[i] = ((v + 1.0) * 32767.5) as u16, n);
-            }, err, None),
-            f => return Err(format!("Unsupported audio output format {f:?}.")),
-        }.map_err(|e| e.to_string())?;
-        stream.play().map_err(|e| e.to_string())?;
-        Ok(Player { queue, _stream: stream })
+    /// Interleaved 48 kHz stereo i16 playback through the default output device.
+    /// Keeps at most 250 ms queued, dropping the oldest audio beyond that.
+    pub struct Player {
+        queue: Arc<Mutex<VecDeque<i16>>>,
+        _stream: cpal::Stream,
     }
 
-    pub fn play(&self, samples: &[i16]) {
-        let mut q = self.queue.lock().unwrap();
-        q.extend(samples);
-        while q.len() > MAX_QUEUED {
-            q.pop_front();
+    const SOURCE_RATE: u32 = 48_000;
+    const MAX_QUEUED: usize = 12_000 * 2;
+
+    impl Player {
+        pub fn new() -> Result<Self, String> {
+            use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+            let host = cpal::default_host();
+            let device = host.default_output_device().ok_or("No audio output device.")?;
+            let config = device.default_output_config().map_err(|e| e.to_string())?;
+            let channels = config.channels() as usize;
+            let rate = config.sample_rate().0;
+            let queue: Arc<Mutex<VecDeque<i16>>> = Arc::default();
+            let q = queue.clone();
+            // Nearest-sample resampling from 48 kHz stereo to the device format.
+            let mut phase = 0f64;
+            let step = SOURCE_RATE as f64 / rate as f64;
+            let mut frame = [0i16; 2];
+            let mut fill = move |out: &mut dyn FnMut(usize, f32), frames: usize| {
+                let mut q = q.lock().unwrap();
+                for f in 0..frames {
+                    phase += step;
+                    while phase >= 1.0 {
+                        phase -= 1.0;
+                        if q.len() >= 2 {
+                            frame = [q.pop_front().unwrap(), q.pop_front().unwrap()];
+                        } else {
+                            frame = [0, 0];
+                        }
+                    }
+                    for c in 0..channels {
+                        let s = if channels == 1 { (frame[0] as f32 + frame[1] as f32) / 2.0 } else { frame[c.min(1)] as f32 };
+                        out(f * channels + c, s / 32768.0);
+                    }
+                }
+            };
+            let err = |e| eprintln!("linuxviewer: audio: {e}");
+            let cfg: cpal::StreamConfig = config.config();
+            let stream = match config.sample_format() {
+                cpal::SampleFormat::F32 => device.build_output_stream(&cfg, move |d: &mut [f32], _| {
+                    let n = d.len() / channels;
+                    fill(&mut |i, v| d[i] = v, n);
+                }, err, None),
+                cpal::SampleFormat::I16 => device.build_output_stream(&cfg, move |d: &mut [i16], _| {
+                    let n = d.len() / channels;
+                    fill(&mut |i, v| d[i] = (v * 32767.0) as i16, n);
+                }, err, None),
+                cpal::SampleFormat::U16 => device.build_output_stream(&cfg, move |d: &mut [u16], _| {
+                    let n = d.len() / channels;
+                    fill(&mut |i, v| d[i] = ((v + 1.0) * 32767.5) as u16, n);
+                }, err, None),
+                f => return Err(format!("Unsupported audio output format {f:?}.")),
+            }.map_err(|e| e.to_string())?;
+            stream.play().map_err(|e| e.to_string())?;
+            Ok(Player { queue, _stream: stream })
+        }
+
+        pub fn play(&self, samples: &[i16]) {
+            let mut q = self.queue.lock().unwrap();
+            q.extend(samples);
+            while q.len() > MAX_QUEUED {
+                q.pop_front();
+            }
         }
     }
 }
