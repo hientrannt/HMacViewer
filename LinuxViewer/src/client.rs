@@ -177,6 +177,7 @@ pub fn connect_with(profile: &Profile, partner_id: &str, password: &str, options
         return Err("UltraViewer passwords must be ASCII.".into());
     }
     let session = ClientSession { handle: SessionHandle { screen: Arc::new(Mutex::new(None)), shared: Arc::new(Shared::default()) } };
+    #[cfg(feature = "desktop")]
     let notify = if options.console || options.clipboard {
         crate::console::wrap(session.handle(), options.console, options.clipboard, options.chat_on_stdout, notify)
     } else {

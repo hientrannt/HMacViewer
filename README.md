@@ -242,6 +242,26 @@ cargo build --release
 ./target/release/linuxviewer
 ```
 
+## Android (thử nghiệm)
+
+Ứng dụng Android trong `AndroidViewer/` dùng điện thoại để **xem và điều khiển**
+máy tính đang chạy UltraViewer hoặc HMacViewer (chưa hỗ trợ cho người khác điều
+khiển điện thoại). Lõi giao thức là bản Rust của LinuxViewer, gọi qua JNI.
+
+- Tải `HMacViewer.apk` ở trang Releases, mở file trên điện thoại và cho phép cài
+  từ nguồn này. Yêu cầu Android 7.0 trở lên.
+- Chạm: nhấp chuột · Nhấn giữ: chuột phải · Kéo một ngón: kéo thả · Hai ngón:
+  cuộn, chụm để phóng to (khi đã phóng to, hai ngón để di chuyển) · Nút ⋯ ở góc
+  phải mở/ẩn thanh công cụ (bàn phím, Esc, Tab, Win, phím mũi tên, ngắt kết nối).
+
+Build: cần Android SDK/NDK, Rust và `cargo-ndk`.
+
+```sh
+cd AndroidViewer/native
+cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../app/src/main/jniLibs build --release
+cd .. && ./gradlew assembleRelease
+```
+
 ## Cấu trúc thư mục
 
 ```

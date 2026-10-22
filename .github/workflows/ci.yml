@@ -128,3 +128,42 @@ jobs:
           name: linuxviewer-${{ github.sha }}
           path: LinuxViewer/target/release/linuxviewer
           retention-days: 14
+
+  android:
+    name: Android app
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Rust Android targets
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo install cargo-ndk --locked --version 4.1.2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: AndroidViewer/native
+
+      - name: Build native library
+        working-directory: AndroidViewer/native
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../app/src/main/jniLibs build --release --locked
+
+      - name: Build APK
+        working-directory: AndroidViewer
+        env:
+          HMACVIEWER_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./gradlew --no-daemon assembleRelease
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HMacViewer-android-${{ github.sha }}
+          path: AndroidViewer/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14

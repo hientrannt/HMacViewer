@@ -246,3 +246,80 @@ jobs:
             dist/linux/linuxviewer-wayland-x86_64.tar.gz
             dist/linux/linuxviewer-wayland-amd64.deb
             dist/linux/SHA256SUMS-linux.txt
+
+  android-release:
+    name: Build & publish Android app
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Resolve version
+        run: |
+          version="${TAG#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          case "$version" in
+            *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV" ;;
+            *)   echo "PRERELEASE=false" >> "$GITHUB_ENV" ;;
+          esac
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Rust Android targets
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo install cargo-ndk --locked --version 4.1.2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: AndroidViewer/native
+
+      - name: Build native library
+        working-directory: AndroidViewer/native
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../app/src/main/jniLibs build --release --locked
+
+      - name: Build signed APK
+        working-directory: AndroidViewer
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          HMACVIEWER_VERSION: ${{ env.VERSION }}
+          HMACVIEWER_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_B64" ]; then
+            echo "$ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+            export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          else
+            echo "::warning::ANDROID_KEYSTORE_B64 not set; the APK is signed with a throwaway debug key."
+          fi
+          ./gradlew --no-daemon assembleRelease
+          rm -f "$RUNNER_TEMP/release.jks"
+          mkdir -p ../release
+          cp app/build/outputs/apk/release/app-release.apk "../release/HMacViewer-${VERSION}.apk"
+          cp app/build/outputs/apk/release/app-release.apk ../release/HMacViewer.apk
+          cd ../release && sha256sum HMacViewer-${VERSION}.apk HMacViewer.apk > SHA256SUMS-android.txt
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          prerelease: ${{ env.PRERELEASE }}
+          fail_on_unmatched_files: true
+          files: |
+            release/HMacViewer-${{ env.VERSION }}.apk
+            release/HMacViewer.apk
+            release/SHA256SUMS-android.txt

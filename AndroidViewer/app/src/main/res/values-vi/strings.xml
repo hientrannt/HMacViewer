@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="subtitle">Điều khiển máy tính đang chạy UltraViewer hoặc HMacViewer.</string>
+    <string name="partner_id">ID máy đối tác</string>
+    <string name="password">Mật khẩu</string>
+    <string name="connect">Kết nối</string>
+    <string name="recent">Gần đây</string>
+    <string name="enter_id_password">Nhập ID và mật khẩu của máy đối tác.</string>
+    <string name="connecting">Đang kết nối…</string>
+    <string name="disconnect">Ngắt kết nối</string>
+    <string name="disconnect_question">Ngắt kết nối với máy kia?</string>
+    <string name="cancel">Hủy</string>
+    <string name="keyboard">Bàn phím</string>
+    <string name="view_only">Máy kia chỉ cho phép xem.</string>
+    <string name="session_ended">Phiên đã kết thúc</string>
+    <string name="ok">OK</string>
+    <string name="help">Chạm: nhấp chuột · Nhấn giữ: chuột phải · Kéo: kéo thả · Hai ngón: cuộn, chụm để phóng to</string>
+</resources>
