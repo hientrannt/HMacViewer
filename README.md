@@ -250,9 +250,11 @@ khiển điện thoại). Lõi giao thức là bản Rust của LinuxViewer, g�
 
 - Tải `HMacViewer.apk` ở trang Releases, mở file trên điện thoại và cho phép cài
   từ nguồn này. Yêu cầu Android 7.0 trở lên.
-- Chạm: nhấp chuột · Nhấn giữ: chuột phải · Kéo một ngón: kéo thả · Hai ngón:
-  cuộn, chụm để phóng to (khi đã phóng to, hai ngón để di chuyển) · Nút ⋯ ở góc
-  phải mở/ẩn thanh công cụ (bàn phím, Esc, Tab, Win, phím mũi tên, ngắt kết nối).
+- Chế độ **Touchpad** (mặc định): rê ngón để di chuột, chạm để nhấp, chạm hai ngón
+  để nhấp phải, giữ rồi rê để kéo thả. Chế độ **Chạm trực tiếp**: nhấp ngay chỗ chạm.
+  Hai ngón để cuộn, chụm để phóng to quanh con trỏ; màn hình tự đi theo con trỏ.
+- Nút ⋯ ở góc phải mở/ẩn thanh công cụ: bàn phím, chế độ chạm, phóng to, chất lượng
+  hình (Nhanh/Nét), Esc, Tab, Win, phím mũi tên, ngắt kết nối.
 
 Build: cần Android SDK/NDK, Rust và `cargo-ndk`.
 

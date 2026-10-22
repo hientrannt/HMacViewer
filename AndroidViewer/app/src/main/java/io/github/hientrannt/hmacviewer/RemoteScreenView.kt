@@ -6,15 +6,18 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.os.SystemClock
 import android.text.InputType
-import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
@@ -28,45 +31,77 @@ interface RemoteInputSink {
 }
 
 /**
- * Shows the remote screen fitted to the view (pinch to zoom, two fingers to
- * pan when zoomed or scroll otherwise) and turns touches into mouse input:
- * tap clicks, long press right-clicks, one-finger drag drags.
+ * Shows the remote screen and turns touches into mouse input.
+ *
+ * Touchpad mode (default) works like a laptop trackpad: sliding a finger
+ * moves the cursor, tap clicks where the cursor is, two-finger tap
+ * right-clicks, press-and-hold then slide drags. Direct mode clicks where the
+ * finger touches. In both, two fingers scroll, pinch zooms around the cursor,
+ * and a zoomed view follows the cursor.
  */
 class RemoteScreenView(context: Context, private val sink: RemoteInputSink) : View(context) {
     var bitmap: Bitmap? = null
-        set(value) { field = value; zoom = 1f; panX = 0f; panY = 0f; invalidate() }
+        set(value) {
+            val resized = value?.width != field?.width || value?.height != field?.height
+            field = value
+            if (resized && value != null) { cursorX = value.width / 2f; cursorY = value.height / 2f; panX = 0f; panY = 0f }
+            invalidate()
+        }
 
+    var touchpadMode = true
+    /** Zoom over the fitted size, 1 to 6. */
+    var zoom = 1f
+        set(value) { field = value.coerceIn(1f, MAX_ZOOM); followCursor(); invalidate() }
+
+    private val density = resources.displayMetrics.density
+    private val slop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private val pointerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
-    private val pointerOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.BLACK; style = Paint.Style.STROKE; strokeWidth = 2f
+    private val cursorFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    private val cursorEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK; style = Paint.Style.STROKE; strokeWidth = 1.5f * density; strokeJoin = Paint.Join.ROUND
     }
-    private var zoom = 1f
     private var panX = 0f
     private var panY = 0f
-    private var pointer: Pair<Int, Int>? = null
-    private var dragging = false
+    private var cursorX = 0f
+    private var cursorY = 0f
+
+    // Gesture state.
+    private var downX = 0f
+    private var downY = 0f
+    private var lastX = 0f
+    private var lastY = 0f
+    private var downTime = 0L
+    private var moved = false
+    private var holding = false
     private var multiTouch = false
-    private var lastFocus: Pair<Float, Float>? = null
+    private var multiMoved = false
+    private var multiStart = 0L
+    private var lastFocusY = 0f
+    private var scaled = false
     private var composing = ""
+
+    private val holdStart = Runnable {
+        if (moved || multiTouch) return@Runnable
+        if (!touchpadMode) placeCursor(downX, downY)
+        holding = true
+        performHapticFeedback(HAPTIC_FEEDBACK_ENABLED)
+        if (touchpadMode) {
+            sink.button(0, true, cursorX.toInt(), cursorY.toInt())
+        } else {
+            // Direct mode: holding without moving is a right click.
+            sink.button(1, true, cursorX.toInt(), cursorY.toInt())
+            sink.button(1, false, cursorX.toInt(), cursorY.toInt())
+        }
+    }
 
     init {
         isFocusable = true
         isFocusableInTouchMode = true
     }
 
-    // Fit scale and the top-left of the drawn image, in view pixels.
     private fun scale(b: Bitmap) = min(width / b.width.toFloat(), height / b.height.toFloat()) * zoom
     private fun originX(b: Bitmap) = (width - b.width * scale(b)) / 2 + panX
     private fun originY(b: Bitmap) = (height - b.height * scale(b)) / 2 + panY
-
-    private fun toRemote(x: Float, y: Float): Pair<Int, Int>? {
-        val b = bitmap ?: return null
-        val s = scale(b)
-        val rx = ((x - originX(b)) / s).toInt().coerceIn(0, b.width - 1)
-        val ry = ((y - originY(b)) / s).toInt().coerceIn(0, b.height - 1)
-        return rx to ry
-    }
 
     private fun clampPan() {
         val b = bitmap ?: return
@@ -75,6 +110,44 @@ class RemoteScreenView(context: Context, private val sink: RemoteInputSink) : Vi
         val spareY = max(0f, (b.height * s - height) / 2)
         panX = panX.coerceIn(-spareX, spareX)
         panY = panY.coerceIn(-spareY, spareY)
+    }
+
+    /** Pans a zoomed view so the cursor stays inside a margin of the screen. */
+    private fun followCursor() {
+        val b = bitmap ?: return
+        val s = scale(b)
+        val margin = min(width, height) * 0.2f
+        val x = originX(b) + cursorX * s
+        val y = originY(b) + cursorY * s
+        if (x < margin) panX += margin - x else if (x > width - margin) panX -= x - (width - margin)
+        if (y < margin) panY += margin - y else if (y > height - margin) panY -= y - (height - margin)
+        clampPan()
+    }
+
+    private fun placeCursor(viewX: Float, viewY: Float) {
+        val b = bitmap ?: return
+        val s = scale(b)
+        cursorX = ((viewX - originX(b)) / s).coerceIn(0f, b.width - 1f)
+        cursorY = ((viewY - originY(b)) / s).coerceIn(0f, b.height - 1f)
+    }
+
+    private fun moveCursorBy(dx: Float, dy: Float) {
+        val b = bitmap ?: return
+        // Faster finger movement travels further, like a trackpad.
+        val speed = hypot(dx, dy) / density
+        val gain = (1f + min(speed / 12f, 1.5f)) / scale(b)
+        cursorX = (cursorX + dx * gain).coerceIn(0f, b.width - 1f)
+        cursorY = (cursorY + dy * gain).coerceIn(0f, b.height - 1f)
+    }
+
+    private fun sendCursor() {
+        sink.pointer(cursorX.toInt(), cursorY.toInt())
+        followCursor()
+        invalidate()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        clampPan()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -86,67 +159,30 @@ class RemoteScreenView(context: Context, private val sink: RemoteInputSink) : Vi
         canvas.scale(s, s)
         canvas.drawBitmap(b, 0f, 0f, paint)
         canvas.restore()
-        pointer?.let { (rx, ry) ->
-            val x = originX(b) + rx * s
-            val y = originY(b) + ry * s
-            val d = resources.displayMetrics.density
-            val arrow = Path().apply {
-                moveTo(x, y); lineTo(x, y + 18 * d); lineTo(x + 5 * d, y + 13 * d)
-                lineTo(x + 12 * d, y + 13 * d); close()
-            }
-            canvas.drawPath(arrow, pointerPaint)
-            canvas.drawPath(arrow, pointerOutline)
+        val x = originX(b) + cursorX * s
+        val y = originY(b) + cursorY * s
+        val d = density
+        val arrow = Path().apply {
+            moveTo(x, y); lineTo(x, y + 22 * d); lineTo(x + 5.5f * d, y + 17 * d)
+            lineTo(x + 9.5f * d, y + 25.5f * d); lineTo(x + 13f * d, y + 24 * d)
+            lineTo(x + 9f * d, y + 15.5f * d); lineTo(x + 16 * d, y + 15.5f * d); close()
         }
+        canvas.drawPath(arrow, cursorFill)
+        canvas.drawPath(arrow, cursorEdge)
     }
-
-    private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-        override fun onDown(e: MotionEvent) = true
-
-        override fun onSingleTapUp(e: MotionEvent): Boolean {
-            val p = toRemote(e.x, e.y) ?: return false
-            pointer = p
-            sink.button(0, true, p.first, p.second)
-            sink.button(0, false, p.first, p.second)
-            invalidate()
-            return true
-        }
-
-        override fun onLongPress(e: MotionEvent) {
-            if (multiTouch || dragging) return
-            val p = toRemote(e.x, e.y) ?: return
-            pointer = p
-            performHapticFeedback(HAPTIC_FEEDBACK_ENABLED)
-            sink.button(1, true, p.first, p.second)
-            sink.button(1, false, p.first, p.second)
-            invalidate()
-        }
-
-        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
-            if (multiTouch || e2.pointerCount > 1) return false
-            val p = toRemote(e2.x, e2.y) ?: return false
-            if (!dragging) {
-                val start = e1?.let { toRemote(it.x, it.y) } ?: p
-                dragging = true
-                sink.button(0, true, start.first, start.second)
-            }
-            pointer = p
-            sink.pointer(p.first, p.second)
-            invalidate()
-            return true
-        }
-    }).apply { setIsLongpressEnabled(true) }
 
     private val scaler = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
             val b = bitmap ?: return false
+            scaled = true
+            // Zoom around the cursor so the point being worked on stays put.
             val before = scale(b)
-            zoom = (zoom * detector.scaleFactor).coerceIn(1f, 6f)
-            val ratio = scale(b) / before
-            // Keep the content under the fingers in place.
-            val cx = width / 2f
-            val cy = height / 2f
-            panX = (panX + cx - detector.focusX) * ratio - cx + detector.focusX
-            panY = (panY + cy - detector.focusY) * ratio - cy + detector.focusY
+            val cx = originX(b) + cursorX * before
+            val cy = originY(b) + cursorY * before
+            zoom = (zoom * detector.scaleFactor).coerceIn(1f, MAX_ZOOM)
+            val after = scale(b)
+            panX += cx - (originX(b) + cursorX * after)
+            panY += cy - (originY(b) + cursorY * after)
             clampPan()
             invalidate()
             return true
@@ -156,43 +192,85 @@ class RemoteScreenView(context: Context, private val sink: RemoteInputSink) : Vi
     override fun onTouchEvent(event: MotionEvent): Boolean {
         scaler.onTouchEvent(event)
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { multiTouch = false; lastFocus = null }
-            MotionEvent.ACTION_POINTER_DOWN -> {
-                multiTouch = true
-                endDrag(event)
-                lastFocus = focus(event)
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x; downY = event.y; lastX = event.x; lastY = event.y
+                downTime = SystemClock.uptimeMillis()
+                moved = false; holding = false; multiTouch = false; scaled = false
+                postDelayed(holdStart, HOLD_MS)
             }
-            MotionEvent.ACTION_MOVE -> if (multiTouch && event.pointerCount >= 2) {
-                val (fx, fy) = focus(event)
-                lastFocus?.let { (lx, ly) ->
-                    if (zoom > 1.01f) {
-                        panX += fx - lx; panY += fy - ly; clampPan(); invalidate()
-                    } else {
-                        // About one wheel step per 40 dp, finger up scrolls content down.
-                        sink.scroll((fy - ly) / (40 * resources.displayMetrics.density))
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                removeCallbacks(holdStart)
+                if (!multiTouch) {
+                    multiTouch = true; multiMoved = false; multiStart = SystemClock.uptimeMillis()
+                }
+                if (holding && touchpadMode) {
+                    holding = false
+                    sink.button(0, false, cursorX.toInt(), cursorY.toInt())
+                }
+                lastFocusY = focusY(event)
+            }
+            MotionEvent.ACTION_MOVE -> if (multiTouch) {
+                if (event.pointerCount >= 2 && !scaler.isInProgress) {
+                    val fy = focusY(event)
+                    val dy = fy - lastFocusY
+                    if (abs(dy) > 0.5f) multiMoved = true
+                    // About one wheel step per 30 dp; fingers up scroll the content down.
+                    if (!scaled) sink.scroll(dy / (30 * density))
+                    lastFocusY = fy
+                } else if (scaler.isInProgress) multiMoved = true
+            } else {
+                if (!moved && hypot(event.x - downX, event.y - downY) > slop) {
+                    moved = true
+                    removeCallbacks(holdStart)
+                    if (!touchpadMode && !holding) {
+                        // Direct mode: a drag presses where the finger went down.
+                        placeCursor(downX, downY)
+                        holding = true
+                        sink.button(0, true, cursorX.toInt(), cursorY.toInt())
                     }
                 }
-                lastFocus = fx to fy
+                if (moved) {
+                    if (touchpadMode) moveCursorBy(event.x - lastX, event.y - lastY) else placeCursor(event.x, event.y)
+                    sendCursor()
+                }
+                lastX = event.x; lastY = event.y
             }
-            MotionEvent.ACTION_POINTER_UP -> lastFocus = null
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> endDrag(event)
+            MotionEvent.ACTION_POINTER_UP -> lastFocusY = focusY(event, excluding = event.actionIndex)
+            MotionEvent.ACTION_UP -> {
+                removeCallbacks(holdStart)
+                val quick = SystemClock.uptimeMillis() - (if (multiTouch) multiStart else downTime) < TAP_MS
+                when {
+                    multiTouch -> if (!multiMoved && !scaled && quick) click(1)
+                    holding -> if (touchpadMode || moved) sink.button(0, false, cursorX.toInt(), cursorY.toInt())
+                    !moved && quick -> {
+                        if (!touchpadMode) placeCursor(event.x, event.y)
+                        click(0)
+                    }
+                }
+                holding = false
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(holdStart)
+                if (holding) sink.button(0, false, cursorX.toInt(), cursorY.toInt())
+                holding = false
+            }
         }
-        if (!multiTouch) gestures.onTouchEvent(event)
         return true
     }
 
-    private fun focus(e: MotionEvent): Pair<Float, Float> {
-        var x = 0f
-        var y = 0f
-        for (i in 0 until e.pointerCount) { x += e.getX(i); y += e.getY(i) }
-        return x / e.pointerCount to y / e.pointerCount
+    private fun click(button: Int) {
+        val (x, y) = cursorX.toInt() to cursorY.toInt()
+        sink.button(button, true, x, y)
+        sink.button(button, false, x, y)
+        followCursor()
+        invalidate()
     }
 
-    private fun endDrag(e: MotionEvent) {
-        if (!dragging) return
-        dragging = false
-        val p = pointer ?: toRemote(e.x, e.y) ?: return
-        sink.button(0, false, p.first, p.second)
+    private fun focusY(e: MotionEvent, excluding: Int = -1): Float {
+        var y = 0f
+        var n = 0
+        for (i in 0 until e.pointerCount) if (i != excluding) { y += e.getY(i); n++ }
+        return if (n == 0) lastFocusY else y / n
     }
 
     // Soft keyboard: committed and composing text is typed on the remote
@@ -259,5 +337,11 @@ class RemoteScreenView(context: Context, private val sink: RemoteInputSink) : Vi
         val ch = event.unicodeChar
         if (ch > 0) { sink.text(String(Character.toChars(ch))); return true }
         return false
+    }
+
+    private companion object {
+        const val MAX_ZOOM = 6f
+        const val HOLD_MS = 450L
+        const val TAP_MS = 300L
     }
 }

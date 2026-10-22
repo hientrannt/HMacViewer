@@ -44,7 +44,7 @@ Then run `linuxviewer`.
 
 Requirements: Rust 1.80+, plus on Linux `libxkbcommon-dev`, `libx11-dev`,
 `libxcb1-dev`, `libasound2-dev`, `libpipewire-0.3-dev` and `libclang-dev` (drop
-PipeWire with `--no-default-features`, which also removes Wayland hosting). The
+PipeWire with `--no-default-features --features desktop`, which also removes Wayland hosting). The
 crate reads `../Sources/UltraViewerProtocol/Resources/8bit.dat`, so build it
 inside a full checkout of this repository.
 

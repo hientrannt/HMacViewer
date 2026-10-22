@@ -14,5 +14,10 @@
     <string name="view_only">Máy kia chỉ cho phép xem.</string>
     <string name="session_ended">Phiên đã kết thúc</string>
     <string name="ok">OK</string>
-    <string name="help">Chạm: nhấp chuột · Nhấn giữ: chuột phải · Kéo: kéo thả · Hai ngón: cuộn, chụm để phóng to</string>
+    <string name="mode_touchpad">Touchpad</string>
+    <string name="mode_direct">Chạm trực tiếp</string>
+    <string name="zoom">Phóng to</string>
+    <string name="quality_fast">Nhanh</string>
+    <string name="quality_sharp">Nét</string>
+    <string name="help">Touchpad: rê ngón để di chuột, chạm để nhấp, chạm hai ngón để nhấp phải, giữ rồi rê để kéo thả · Hai ngón: cuộn, chụm để phóng to</string>
 </resources>

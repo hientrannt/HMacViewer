@@ -18,6 +18,12 @@ object NativeSession {
     /** Copies a new frame as ARGB into [out] (width × height); false when nothing changed. */
     @JvmStatic external fun nativeCopyFrame(handle: Long, out: IntArray): Boolean
 
+    /** Draws a new frame into [bitmap] (ARGB_8888, screen size); false when nothing changed. */
+    @JvmStatic external fun nativeDrawFrame(handle: Long, bitmap: android.graphics.Bitmap): Boolean
+
+    /** Display quality 1-100 asked of the host (30 fast, 70 sharp). */
+    @JvmStatic external fun nativeSetQuality(handle: Long, quality: Int)
+
     @JvmStatic external fun nativePointer(handle: Long, x: Int, y: Int)
     @JvmStatic external fun nativeButton(handle: Long, button: Int, pressed: Boolean, x: Int, y: Int)
     @JvmStatic external fun nativeScroll(handle: Long, steps: Float)

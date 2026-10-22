@@ -19,6 +19,7 @@ import android.widget.TextView
 import android.widget.Toast
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 
 /** One remote session: full screen, landscape, with a small floating toolbar. */
 class SessionActivity : Activity(), RemoteInputSink {
@@ -28,18 +29,19 @@ class SessionActivity : Activity(), RemoteInputSink {
     private lateinit var screen: RemoteScreenView
     private lateinit var status: TextView
     private lateinit var toolbar: LinearLayout
-    private var pixels: IntArray? = null
     private var frameBitmap: Bitmap? = null
     private var ended = false
+    private var zoomedOnce = false
+    private var sharpImage = false
+    // Only the newest pointer position waits to be sent; older moves are dropped.
+    private val pendingPointer = AtomicReference<Pair<Int, Int>?>(null)
 
     private val tick = object : Runnable {
         override fun run() {
             if (handle == 0L) return
             pollEvents()
-            val buffer = pixels
             val bitmap = frameBitmap
-            if (handle != 0L && buffer != null && bitmap != null && NativeSession.nativeCopyFrame(handle, buffer)) {
-                bitmap.setPixels(buffer, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            if (handle != 0L && bitmap != null && NativeSession.nativeDrawFrame(handle, bitmap)) {
                 status.visibility = View.GONE
                 screen.invalidate()
             }
@@ -61,12 +63,25 @@ class SessionActivity : Activity(), RemoteInputSink {
             setBackgroundColor(0xB0202030.toInt())
             setPadding((4 * dp).toInt(), 0, (4 * dp).toInt(), 0)
         }
-        fun tool(label: String, action: () -> Unit) = toolbar.addView(Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+        fun tool(label: String, action: () -> Unit) = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
             text = label; setTextColor(Color.WHITE); isAllCaps = false; minWidth = 0; minimumWidth = 0
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
             setOnClickListener { action() }
-        })
+            toolbar.addView(this)
+        }
         tool("⌨ " + getString(R.string.keyboard)) { toggleKeyboard() }
+        lateinit var modeButton: Button
+        modeButton = tool(getString(R.string.mode_touchpad)) {
+            screen.touchpadMode = !screen.touchpadMode
+            modeButton.text = getString(if (screen.touchpadMode) R.string.mode_touchpad else R.string.mode_direct)
+        }
+        tool("🔍 " + getString(R.string.zoom)) { screen.zoom = if (screen.zoom > 1.05f) 1f else 2.5f }
+        lateinit var qualityButton: Button
+        qualityButton = tool(getString(R.string.quality_fast)) {
+            sharpImage = !sharpImage
+            qualityButton.text = getString(if (sharpImage) R.string.quality_sharp else R.string.quality_fast)
+            onSender { NativeSession.nativeSetQuality(it, if (sharpImage) 70 else 30) }
+        }
         tool("Esc") { key(RemoteKey.ESCAPE) }
         tool("Tab") { key(RemoteKey.TAB) }
         tool("⊞ Win") { key(RemoteKey.WINDOWS) }
@@ -112,9 +127,13 @@ class SessionActivity : Activity(), RemoteInputSink {
                 'C' -> {
                     val (w, h) = body.split(':').map { it.toInt() }
                     if (frameBitmap?.width != w || frameBitmap?.height != h) {
-                        pixels = IntArray(w * h)
                         frameBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                         screen.bitmap = frameBitmap
+                    }
+                    // On a phone a whole desktop is tiny: start zoomed in around the cursor.
+                    if (!zoomedOnce && resources.configuration.smallestScreenWidthDp < 600) {
+                        zoomedOnce = true
+                        screen.zoom = 2f
                     }
                 }
                 'V' -> if (body == "1") Toast.makeText(this, R.string.view_only, Toast.LENGTH_LONG).show()
@@ -188,7 +207,11 @@ class SessionActivity : Activity(), RemoteInputSink {
         if (h != 0L) sender.execute { block(h) }
     }
 
-    override fun pointer(x: Int, y: Int) = onSender { NativeSession.nativePointer(it, x, y) }
+    override fun pointer(x: Int, y: Int) {
+        if (pendingPointer.getAndSet(x to y) == null) {
+            onSender { h -> pendingPointer.getAndSet(null)?.let { (px, py) -> NativeSession.nativePointer(h, px, py) } }
+        }
+    }
     override fun button(button: Int, pressed: Boolean, x: Int, y: Int) =
         onSender { NativeSession.nativeButton(it, button, pressed, x, y) }
     override fun scroll(steps: Float) = onSender { NativeSession.nativeScroll(it, steps) }

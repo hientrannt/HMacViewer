@@ -4,7 +4,7 @@
 //! touch and IME input as Windows mouse/keyboard messages.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use jni::objects::{JClass, JIntArray, JString};
@@ -23,6 +23,22 @@ struct Session {
     events: Arc<Mutex<VecDeque<String>>>,
     frame_dirty: Arc<AtomicBool>,
     mouse: Mutex<Mouse>,
+    /// Display quality asked of the host after every screen init (31|||n).
+    quality: AtomicI32,
+}
+
+/// Speed preset of RemoteControlCommands.QualityPreset: phones usually sit on
+/// slower links, and fewer bytes per frame means quicker screen updates.
+const DEFAULT_QUALITY: i32 = 30;
+
+/// RemoteControlCommands.unicode: UTF-16LE text sent with the format flag.
+fn unicode(text: &str) -> Vec<u8> {
+    text.encode_utf16().flat_map(u16::to_le_bytes).collect()
+}
+
+fn apply_quality(s: &Session) {
+    s.session.send_command(b"32|||2".to_vec(), false);
+    s.session.send_command(format!("31|||{}", s.quality.load(Ordering::SeqCst)).into_bytes(), false);
 }
 
 /// Pointer state for MouseMessage flags (MacRemoteInputEncoder's mouse half).
@@ -110,7 +126,7 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
             };
             queue.lock().unwrap().push_back(line);
         }))?;
-        Ok(Session { session, events, frame_dirty, mouse: Mutex::default() })
+        Ok(Session { session, events, frame_dirty, mouse: Mutex::default(), quality: AtomicI32::new(DEFAULT_QUALITY) })
     });
     match result {
         Ok(s) => Box::into_raw(Box::new(s)) as jlong,
@@ -143,8 +159,11 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
         mouse.origin = origin;
         mouse.binary_keyboard = input::supports_binary_keyboard(&s.session.partner_version());
         drop(mouse);
-        // Ask for cursor positions after every init, as the desktop viewers do.
+        // Ask for cursor positions after every init, as the desktop viewers do,
+        // then keep the chosen quality and hide the wallpaper to save bandwidth.
         s.session.send_command(b"28|||1".to_vec(), false);
+        apply_quality(s);
+        s.session.send_command(unicode("23|||0"), true);
     }
     env.new_string(line).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
 }
@@ -171,6 +190,83 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
         return JNI_FALSE;
     }
     JNI_TRUE
+}
+
+/// Writes a new frame straight into an ARGB_8888 bitmap of the screen's size.
+/// Returns whether the bitmap changed.
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_nativeDrawFrame(
+    env: JNIEnv, _: JClass, handle: jlong, bitmap: jni::objects::JObject) -> jboolean {
+    let Some(s) = session(handle) else { return JNI_FALSE };
+    if !s.frame_dirty.swap(false, Ordering::SeqCst) {
+        return JNI_FALSE;
+    }
+    let Ok(guard) = s.session.screen.lock() else { return JNI_FALSE };
+    let Some(renderer) = guard.as_ref() else { return JNI_FALSE };
+    let (width, height) = (renderer.width(), renderer.height());
+    let raw_env = env.get_raw() as *mut std::ffi::c_void;
+    let raw_bitmap = bitmap.as_raw() as *mut std::ffi::c_void;
+    let mut info = bitmap::Info::default();
+    // SAFETY: env and bitmap are the live JNI arguments of this call.
+    if unsafe { bitmap::AndroidBitmap_getInfo(raw_env, raw_bitmap, &mut info) } != 0
+        || info.width != width || info.height != height || info.format != bitmap::FORMAT_RGBA_8888 {
+        s.frame_dirty.store(true, Ordering::SeqCst);
+        return JNI_FALSE;
+    }
+    let mut address = std::ptr::null_mut();
+    // SAFETY: as above; the pixels stay locked until the unlock below.
+    if unsafe { bitmap::AndroidBitmap_lockPixels(raw_env, raw_bitmap, &mut address) } != 0 || address.is_null() {
+        return JNI_FALSE;
+    }
+    let pixels = renderer.pixels();
+    for y in 0..height as usize {
+        // SAFETY: each row is `stride` bytes inside the locked buffer and holds `width` pixels.
+        let row = unsafe {
+            std::slice::from_raw_parts_mut((address as *mut u8).add(y * info.stride as usize) as *mut u32, width as usize)
+        };
+        let source = &pixels[y * width as usize..(y + 1) * width as usize];
+        // 0x00RRGGBB to RGBA bytes (0xAABBGGRR as a little-endian u32).
+        for (out, p) in row.iter_mut().zip(source) {
+            *out = 0xff00_0000 | (p & 0x00ff00) | ((p & 0xff) << 16) | ((p >> 16) & 0xff);
+        }
+    }
+    // SAFETY: matches the successful lock above.
+    unsafe { bitmap::AndroidBitmap_unlockPixels(raw_env, raw_bitmap) };
+    JNI_TRUE
+}
+
+#[cfg(target_os = "android")]
+mod bitmap {
+    use std::ffi::c_void;
+
+    pub const FORMAT_RGBA_8888: i32 = 1;
+
+    #[repr(C)]
+    #[derive(Default)]
+    pub struct Info {
+        pub width: u32,
+        pub height: u32,
+        pub stride: u32,
+        pub format: i32,
+        pub flags: u32,
+    }
+
+    #[link(name = "jnigraphics")]
+    extern "C" {
+        pub fn AndroidBitmap_getInfo(env: *mut c_void, bitmap: *mut c_void, info: *mut Info) -> i32;
+        pub fn AndroidBitmap_lockPixels(env: *mut c_void, bitmap: *mut c_void, address: *mut *mut c_void) -> i32;
+        pub fn AndroidBitmap_unlockPixels(env: *mut c_void, bitmap: *mut c_void) -> i32;
+    }
+}
+
+/// Display quality 1-100 (30 fast, 45 balanced, 70 sharp); kept across screen re-inits.
+#[no_mangle]
+pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_nativeSetQuality(
+    _: JNIEnv, _: JClass, handle: jlong, quality: jint) {
+    let Some(s) = session(handle) else { return };
+    s.quality.store(quality.clamp(1, 100), Ordering::SeqCst);
+    apply_quality(s);
 }
 
 #[no_mangle]
