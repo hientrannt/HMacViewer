@@ -16,6 +16,10 @@ struct ConnectionView: View {
     @State private var showSession = false
     @AppStorage(RemoteSessionCommands.toolbarKey) private var showSessionToolbar = true
     @AppStorage(RemoteSessionCommands.chatSidebarKey) private var showChatSidebar = false
+    static let autoFullScreenKey = "MacViewer.autoFullScreen"
+    @AppStorage(Self.autoFullScreenKey) private var autoFullScreen = true
+    /// Toolbar visibility before the session entered full screen; nil when it didn't.
+    @State private var toolbarBeforeFullScreen: Bool?
     @State private var readMessages = 0
     @State private var remoteWallpaperVisible = true
     @State private var revealPassword = false
@@ -71,8 +75,8 @@ struct ConnectionView: View {
         .onChange(of: hosting.identifier) { id in if id == nil { revealPassword = false } }
         .onChange(of: model.phase) { phase in
             if phase == .connecting || phase == .connected { showSession = true }
-            if phase == .disconnected || phase == .idle { remoteCapture.endSession() }
-            if phase == .connected { sessionWindow = NSApp.keyWindow }
+            if phase == .disconnected || phase == .idle { remoteCapture.endSession(); leaveSessionFullScreen() }
+            if phase == .connected { sessionWindow = NSApp.keyWindow; enterSessionFullScreen() }
         }
         .onAppear {
             let capture = remoteCapture
@@ -595,6 +599,22 @@ struct ConnectionView: View {
         .buttonStyle(.plain)
         .help("Show toolbar")
         .accessibilityLabel("Show toolbar")
+    }
+
+    /// Fills this Mac's screen with the remote one; the toolbar folds into its edge tab.
+    private func enterSessionFullScreen() {
+        guard autoFullScreen, let window = sessionWindow, !window.styleMask.contains(.fullScreen) else { return }
+        toolbarBeforeFullScreen = showSessionToolbar
+        showSessionToolbar = false
+        window.toggleFullScreen(nil)
+    }
+
+    /// Undoes `enterSessionFullScreen` when the session ends.
+    private func leaveSessionFullScreen() {
+        guard let toolbar = toolbarBeforeFullScreen else { return }
+        toolbarBeforeFullScreen = nil
+        showSessionToolbar = toolbar
+        if let window = sessionWindow, window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
     }
 
     private var remoteSession: some View {
