@@ -157,6 +157,7 @@ fn scancode(key: Key) -> (u8, bool) {
         Key::End => (0x4f, true), Key::PageUp => (0x49, true), Key::PageDown => (0x51, true),
         Key::Left => (0x4b, true), Key::Up => (0x48, true), Key::Right => (0x4d, true),
         Key::Down => (0x50, true), Key::Windows => (0x5b, true),
+        Key::Shift => (0x2a, false), Key::Control => (0x1d, false), Key::Alt => (0x38, false),
     }
 }
 

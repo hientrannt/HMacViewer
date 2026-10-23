@@ -19,3 +19,10 @@
 "The session ended." = "The session ended.";
 "Disconnected." = "Disconnected.";
 "No IPv4 network is available. Turn on Wi-Fi or mobile data and try again." = "No IPv4 network is available. Turn on Wi-Fi or mobile data and try again.";
+"Control a computer by UltraViewer, VNC or Remote Desktop (RDP)." = "Control a computer by UltraViewer, VNC or Remote Desktop (RDP).";
+"Connection" = "Connection";
+"IP address or name, e.g. 192.168.1.20" = "IP address or name, e.g. 192.168.1.20";
+"Windows user name" = "Windows user name";
+"Enter the computer's address and password." = "Enter the computer's address and password.";
+"VNC and RDP are not included in this build." = "VNC and RDP are not included in this build.";
+"Sign-in failed. Check the user name and password, and that Remote Desktop is turned on." = "Sign-in failed. Check the user name and password, and that Remote Desktop is turned on.";

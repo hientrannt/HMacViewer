@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import RemoteCoreKit
 import UltraViewerProtocol
 
 @MainActor
@@ -35,6 +36,26 @@ final class ConnectionModel: ObservableObject {
     static let rememberPasswordKey = "MacViewer.rememberPassword"
     static let computerAudioKey = "MacViewer.computerAudio"
     private static let recentPartnersKey = "MacViewer.recentPartners"
+    private static let connectionKindKey = "MacViewer.connectionKind"
+
+    enum ConnectionKind: String, CaseIterable, Identifiable {
+        case ultraViewer, vnc, rdp
+        var id: String { rawValue }
+        var directProtocol: DirectProtocol? {
+            switch self {
+            case .ultraViewer: nil
+            case .vnc: .vnc
+            case .rdp: .rdp
+            }
+        }
+        var title: String {
+            switch self {
+            case .ultraViewer: "UltraViewer"
+            case .vnc: "VNC"
+            case .rdp: "RDP"
+            }
+        }
+    }
     private static let partnerNamesKey = "MacViewer.partnerNames"
 
     /// Per-partner monitor choice; 0 means "all monitors". Kept on this Mac only.
@@ -49,6 +70,12 @@ final class ConnectionModel: ObservableObject {
         }
     }
     @Published var password = ""
+    /// UltraViewer by partner ID, or a direct VNC/RDP connection by address.
+    @Published var connectionKind: ConnectionKind {
+        didSet { defaults.set(connectionKind.rawValue, forKey: Self.connectionKindKey) }
+    }
+    /// RDP user name, optionally DOMAIN\user.
+    @Published var directUser = ""
     @Published private(set) var rememberPassword: Bool
     @Published private(set) var credentialMessage: String?
     @Published private(set) var phase: Phase = .idle
@@ -129,6 +156,7 @@ final class ConnectionModel: ObservableObject {
         self.inputBufferCapacity = inputBufferCapacity
         defaults.register(defaults: [Self.rememberPartnersKey: true, Self.rememberPasswordKey: true])
         rememberPassword = defaults.bool(forKey: Self.rememberPasswordKey)
+        connectionKind = defaults.string(forKey: Self.connectionKindKey).flatMap(ConnectionKind.init(rawValue:)) ?? .ultraViewer
         recentPartners = defaults.bool(forKey: Self.rememberPartnersKey)
             ? Array((defaults.stringArray(forKey: Self.recentPartnersKey) ?? []).prefix(10))
             : []
@@ -137,7 +165,12 @@ final class ConnectionModel: ObservableObject {
     }
 
     var canConnect: Bool {
-        phase != .connecting && phase != .connected && !normalizedPartnerID.isEmpty && !password.isEmpty
+        guard phase != .connecting, phase != .connected else { return false }
+        // VNC servers may have no password.
+        if connectionKind != .ultraViewer {
+            return !partnerID.trimmingCharacters(in: .whitespaces).isEmpty && (connectionKind == .vnc || !password.isEmpty)
+        }
+        return !normalizedPartnerID.isEmpty && !password.isEmpty
     }
 
     var isSessionActive: Bool { phase == .connecting || phase == .connected }
@@ -178,20 +211,37 @@ final class ConnectionModel: ObservableObject {
 
     func connect() {
         guard !isSessionActive else { return }
-        let identifier = normalizedPartnerID
-        guard !identifier.isEmpty, identifier.count <= 64,
-              identifier.unicodeScalars.allSatisfy({ CharacterSet.decimalDigits.contains($0) && $0.isASCII }) else {
-            errorMessage = NativeSessionError.invalidPartnerID.localizedDescription
-            return
-        }
-        guard !password.isEmpty else {
-            errorMessage = NativeSessionError.missingPassword.localizedDescription
-            return
+        let identifier: String
+        if let proto = connectionKind.directProtocol {
+            guard DirectSession.isAvailable else {
+                errorMessage = "VNC and RDP are not included in this build."
+                return
+            }
+            guard let target = DirectTarget(proto: proto, address: partnerID, user: directUser) else {
+                errorMessage = "Enter the computer's address, for example 192.168.1.20 or 192.168.1.20:5901."
+                return
+            }
+            guard proto == .vnc || !password.isEmpty else {
+                errorMessage = NativeSessionError.missingPassword.localizedDescription
+                return
+            }
+            identifier = target.label
+        } else {
+            identifier = normalizedPartnerID
+            guard !identifier.isEmpty, identifier.count <= 64,
+                  identifier.unicodeScalars.allSatisfy({ CharacterSet.decimalDigits.contains($0) && $0.isASCII }) else {
+                errorMessage = NativeSessionError.invalidPartnerID.localizedDescription
+                return
+            }
+            guard !password.isEmpty else {
+                errorMessage = NativeSessionError.missingPassword.localizedDescription
+                return
+            }
+            partnerID = identifier
         }
 
         let suppliedPassword = password
         password = ""
-        partnerID = identifier
         errorMessage = nil
         credentialMessage = nil
         remoteInfo = nil
@@ -205,7 +255,8 @@ final class ConnectionModel: ObservableObject {
         status = "Connecting to \(identifier)…"
         let activeGeneration = UUID()
         generation = activeGeneration
-        pendingCredential = (identifier, suppliedPassword)
+        // Keychain passwords are kept for UltraViewer IDs only.
+        pendingCredential = connectionKind == .ultraViewer ? (identifier, suppliedPassword) : nil
         stopAudio()
         cursorPresenter.reset()
         remoteCursor = nil
@@ -493,6 +544,15 @@ final class ConnectionModel: ObservableObject {
 
     func selectRecent(_ identifier: String) {
         guard !isSessionActive else { return }
+        if let target = DirectTarget(label: identifier) {
+            connectionKind = target.proto == .vnc ? .vnc : .rdp
+            partnerID = target.address
+            directUser = target.user
+            password = ""
+            errorMessage = nil
+            return
+        }
+        connectionKind = .ultraViewer
         let previous = normalizedPartnerID
         partnerID = identifier
         if previous == normalizedPartnerID { fillSavedPassword() }
@@ -538,7 +598,9 @@ final class ConnectionModel: ObservableObject {
             restoreControlAfterRefresh = false
             updateKeyboardNotice(for: info)
             rememberPartner(info.partnerID)
-            if defaults.bool(forKey: Self.computerAudioKey) { requestAudio(true, clearError: false) }
+            if defaults.bool(forKey: Self.computerAudioKey), DirectTarget(label: info.partnerID) == nil {
+                requestAudio(true, clearError: false)
+            }
             if let pending = pendingCredential {
                 pendingCredential = nil
                 if rememberPassword, Self.normalizeID(info.partnerID) == pending.identifier {

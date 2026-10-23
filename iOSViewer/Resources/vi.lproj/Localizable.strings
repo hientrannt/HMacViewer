@@ -19,3 +19,10 @@
 "The session ended." = "Phiên đã kết thúc.";
 "Disconnected." = "Đã ngắt kết nối.";
 "No IPv4 network is available. Turn on Wi-Fi or mobile data and try again." = "Không có mạng IPv4. Hãy bật Wi‑Fi hoặc dữ liệu di động rồi thử lại.";
+"Control a computer by UltraViewer, VNC or Remote Desktop (RDP)." = "Điều khiển máy tính qua UltraViewer, VNC hoặc Remote Desktop (RDP).";
+"Connection" = "Kết nối qua";
+"IP address or name, e.g. 192.168.1.20" = "Địa chỉ IP hoặc tên, ví dụ 192.168.1.20";
+"Windows user name" = "Tên đăng nhập Windows";
+"Enter the computer's address and password." = "Nhập địa chỉ và mật khẩu của máy tính.";
+"VNC and RDP are not included in this build." = "Bản này chưa có VNC và RDP.";
+"Sign-in failed. Check the user name and password, and that Remote Desktop is turned on." = "Đăng nhập thất bại. Kiểm tra tên người dùng, mật khẩu và Remote Desktop đã bật chưa.";

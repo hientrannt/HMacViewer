@@ -72,6 +72,7 @@ fn keysym(key: Key) -> u32 {
         Key::Delete => 0xffff, Key::Home => 0xff50, Key::Left => 0xff51, Key::Up => 0xff52,
         Key::Right => 0xff53, Key::Down => 0xff54, Key::PageUp => 0xff55, Key::PageDown => 0xff56,
         Key::End => 0xff57, Key::Windows => 0xffeb,
+        Key::Shift => 0xffe1, Key::Control => 0xffe3, Key::Alt => 0xffe9,
     }
 }
 

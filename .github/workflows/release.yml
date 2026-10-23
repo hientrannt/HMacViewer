@@ -39,6 +39,13 @@ jobs:
             *)   echo "PRERELEASE=false" >> "$GITHUB_ENV" ;;
           esac
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: RemoteCore
+
+      - name: Build VNC/RDP core
+        run: scripts/build_remotecore.sh
+
       - name: Run tests
         run: swift test --parallel
 

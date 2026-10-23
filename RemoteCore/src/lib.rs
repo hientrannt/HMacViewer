@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+pub mod ffi;
 mod rdp;
 mod vnc;
 
@@ -51,6 +52,8 @@ pub enum Event {
 pub enum Key {
     Backspace, Tab, Enter, Escape, Delete, Home, End, PageUp, PageDown,
     Left, Up, Right, Down, Windows,
+    /// Modifiers, held while other keys or text go out (shortcuts).
+    Shift, Control, Alt,
 }
 
 /// Mouse buttons as a bit mask.

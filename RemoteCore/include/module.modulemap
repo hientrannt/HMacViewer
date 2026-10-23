@@ -1,0 +1,4 @@
+module RemoteCoreFFI {
+    header "remotecore.h"
+    export *
+}
