@@ -823,6 +823,11 @@ public actor UltraViewerRelaySession {
         case 1:
             guard phase == .active, let renderer else { return }
             diagnostics.screenPayloadBytes += UInt64(payload.count)
+            // Acknowledge as the frame is taken up, before decoding, so the
+            // host captures and sends the next one while this one decodes.
+            // Peer frames are consumed one at a time, so at most one more
+            // can wait behind it: the host never runs further ahead.
+            try await sendToPeer(Data("18".utf8))
             do {
                 let (bitmap, elapsed) = try await decodeOffActor(parts, with: renderer)
                 // The actor was free while decoding; drop the result if a
@@ -832,13 +837,9 @@ public actor UltraViewerRelaySession {
                 diagnostics.maximumDecodeNanoseconds = max(diagnostics.maximumDecodeNanoseconds, elapsed)
                 diagnostics.decodedFrames += 1
                 if latestFrame.put(bitmap) { try emit(.frame(latestFrame)) }
-                // Backpressure follows successful decoding, so a slow client
-                // cannot acknowledge a growing queue of stale screen updates.
-                try await sendToPeer(Data("18".utf8))
             } catch let error as ModernScreenMessageError {
                 guard token == generation, phase == .active, self.renderer === renderer else { return }
                 diagnostics.lastScreenFailure = String(describing: error)
-                try await sendToPeer(Data("18".utf8))
                 // A malformed drawing mission must not immediately tear down an
                 // authenticated connection. A new full initialization resets the
                 // decoder and tile cache together; never continue a damaged cache.
