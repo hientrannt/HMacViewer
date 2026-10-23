@@ -21,7 +21,7 @@ pub struct Pacing {
 }
 
 impl Pacing {
-    pub const STANDARD: Pacing = Pacing { changed: Duration::from_millis(40), unchanged: Duration::from_millis(250) };
+    pub const STANDARD: Pacing = Pacing { changed: Duration::from_millis(8), unchanged: Duration::from_millis(60) };
     pub fn delay(&self, frame_changed: bool) -> Duration {
         if frame_changed { self.changed } else { self.unchanged }
     }
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn pacing_and_sequence_policy() {
         let p = Pacing::STANDARD;
-        assert_eq!((p.delay(true), p.delay(false)), (Duration::from_millis(40), Duration::from_millis(250)));
+        assert_eq!((p.delay(true), p.delay(false)), (Duration::from_millis(8), Duration::from_millis(60)));
         assert!(!resets_sequence(Reinit::DisplayLayoutChange));
         assert!(resets_sequence(Reinit::FreshApproval) && resets_sequence(Reinit::ViewerRelogin));
     }
@@ -438,12 +438,12 @@ mod tests {
         assert!(!core.take_capture_due(now + Duration::from_secs(1)));
         core.on_peer(b"18", route(), now).unwrap();
         assert!(!core.take_capture_due(now));
-        let later = now + Duration::from_millis(40);
+        let later = now + Duration::from_millis(8);
         assert!(core.take_capture_due(later));
         // Identical frame is not resent.
         core.submit_frame(frame(1), later).unwrap();
         assert!(sent(&mut core).is_empty());
-        assert!(core.take_capture_due(later + Duration::from_millis(250)));
+        assert!(core.take_capture_due(later + Duration::from_millis(60)));
         core.submit_frame(frame(2), later).unwrap();
         let parts_owned = sent(&mut core);
         assert_eq!(decode_multipart(&parts_owned[0]).unwrap()[4], (FIRST_FRAME_NUMBER + 1).to_le_bytes());

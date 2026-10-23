@@ -816,17 +816,18 @@ public actor UltraViewerHostSession {
 /// Delay between a viewer frame acknowledgment and the next host capture.
 /// Acknowledgment is the real backpressure (one frame in flight, no queue of
 /// stale frames), so these delays only keep the capture loop from spinning; they
-/// are not a fixed frame-rate limit. A pixel-identical capture waits longer
-/// before re-checking the screen so an idle desktop is not captured continuously.
+/// are not a fixed frame-rate limit. A pixel-identical capture waits a little
+/// longer before re-checking, so an idle desktop is polled at about 16 Hz and
+/// the first change after a pause still reaches the viewer quickly.
 struct HostCapturePacing: Sendable, Equatable {
     /// Delay before re-capturing after the viewer acknowledged a sent frame.
     let changedFrameDelay: TimeInterval
     /// Delay before re-checking the screen after a capture produced no changes.
     let unchangedFrameDelay: TimeInterval
 
-    static let standard = HostCapturePacing(changedFrameDelay: 0.04, unchangedFrameDelay: 0.25)
+    static let standard = HostCapturePacing(changedFrameDelay: 0.008, unchangedFrameDelay: 0.06)
 
-    init(changedFrameDelay: TimeInterval = 0.04, unchangedFrameDelay: TimeInterval = 0.25) {
+    init(changedFrameDelay: TimeInterval = 0.008, unchangedFrameDelay: TimeInterval = 0.06) {
         self.changedFrameDelay = changedFrameDelay
         self.unchangedFrameDelay = unchangedFrameDelay
     }

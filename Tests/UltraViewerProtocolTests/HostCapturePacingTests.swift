@@ -6,10 +6,10 @@ import Testing
     let pacing = HostCapturePacing.standard
     // A changed/sent frame is followed almost immediately: the viewer
     // acknowledgment, not a fixed timer, is what limits the frame rate.
-    #expect(pacing.changedFrameDelay == 0.04)
+    #expect(pacing.changedFrameDelay == 0.008)
     // An unchanged capture backs off so a static desktop is not re-captured
     // at full cadence.
-    #expect(pacing.unchangedFrameDelay == 0.25)
+    #expect(pacing.unchangedFrameDelay == 0.06)
     #expect(pacing.delay(afterFrameChanged: true) == pacing.changedFrameDelay)
     #expect(pacing.delay(afterFrameChanged: false) == pacing.unchangedFrameDelay)
     #expect(pacing.changedFrameDelay > 0)

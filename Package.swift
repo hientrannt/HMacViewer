@@ -9,7 +9,7 @@ let minimumMacOS: SupportedPlatform = ProcessInfo.processInfo.environment["MACVI
 let package = Package(
     name: "MacViewer",
     defaultLocalization: "en",
-    platforms: [minimumMacOS],
+    platforms: [minimumMacOS, .iOS(.v16)],
     products: [
         .library(name: "UltraViewerProtocol", targets: ["UltraViewerProtocol"]),
         .executable(name: "MacViewer", targets: ["MacViewer"]),

@@ -918,12 +918,17 @@ impl Run {
     }
 
     fn frame(&mut self, parts: &[&[u8]]) -> Result<()> {
+        if self.screen.lock().unwrap().is_none() {
+            return Ok(());
+        }
+        // Acknowledge as the frame is taken up, before decoding, so the host
+        // captures and sends the next one while this one decodes. Frames are
+        // handled one at a time, so at most one more can wait behind it.
+        self.shared.send_peer(b"18")?;
         let applied = match self.screen.lock().unwrap().as_mut() {
             Some(r) => r.apply(parts),
             None => return Ok(()),
         };
-        // Backpressure follows decoding, so the host never runs ahead of us.
-        self.shared.send_peer(b"18")?;
         match applied {
             Ok(()) => (self.notify)(ClientEvent::FrameReady),
             Err(e) => {
