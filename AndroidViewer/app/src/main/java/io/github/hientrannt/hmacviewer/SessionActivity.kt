@@ -33,6 +33,7 @@ class SessionActivity : Activity(), RemoteInputSink {
     private var ended = false
     private var zoomedOnce = false
     private var sharpImage = false
+    private var directSession = false
     // Only the newest pointer position waits to be sent; older moves are dropped.
     private val pendingPointer = AtomicReference<Pair<Int, Int>?>(null)
 
@@ -82,6 +83,10 @@ class SessionActivity : Activity(), RemoteInputSink {
             qualityButton.text = getString(if (sharpImage) R.string.quality_sharp else R.string.quality_fast)
             onSender { NativeSession.nativeSetQuality(it, if (sharpImage) 70 else 30) }
         }
+        // VNC and RDP pick their own image quality.
+        if (intent.getIntExtra(EXTRA_PROTOCOL, Protocol.ULTRAVIEWER.code) != Protocol.ULTRAVIEWER.code) {
+            qualityButton.visibility = View.GONE
+        }
         tool("Esc") { key(RemoteKey.ESCAPE) }
         tool("Tab") { key(RemoteKey.TAB) }
         tool("⊞ Win") { key(RemoteKey.WINDOWS) }
@@ -105,9 +110,17 @@ class SessionActivity : Activity(), RemoteInputSink {
 
         val id = intent.getStringExtra(EXTRA_ID).orEmpty()
         val password = intent.getStringExtra(EXTRA_PASSWORD).orEmpty()
+        val protocol = intent.getIntExtra(EXTRA_PROTOCOL, Protocol.ULTRAVIEWER.code)
+        directSession = protocol != Protocol.ULTRAVIEWER.code
         val metrics = resources.displayMetrics
         val (w, h) = max(metrics.widthPixels, metrics.heightPixels) to min(metrics.widthPixels, metrics.heightPixels)
-        handle = NativeSession.nativeConnect(id, password, w, h)
+        handle = if (!directSession) {
+            NativeSession.nativeConnect(id, password, w, h)
+        } else {
+            // "host:port" or just "host" (the protocol's default port).
+            val (host, port) = splitHostPort(id)
+            NativeSession.nativeConnectDirect(protocol, host, port, intent.getStringExtra(EXTRA_USER).orEmpty(), password, w, h)
+        }
         if (handle == 0L) {
             showEnded(NativeSession.nativeLastError())
         } else {
@@ -224,5 +237,19 @@ class SessionActivity : Activity(), RemoteInputSink {
     companion object {
         const val EXTRA_ID = "id"
         const val EXTRA_PASSWORD = "password"
+        const val EXTRA_PROTOCOL = "protocol"
+        const val EXTRA_USER = "user"
+
+        /** Splits "host:port" (or "[v6]:port"); 0 means the protocol's default port. */
+        fun splitHostPort(text: String): Pair<String, Int> {
+            val t = text.trim()
+            if (t.startsWith("[")) {
+                val end = t.indexOf(']')
+                if (end > 0) return t.substring(1, end) to (t.substring(end + 1).removePrefix(":").toIntOrNull() ?: 0)
+            }
+            val colon = t.lastIndexOf(':')
+            if (colon > 0 && t.indexOf(':') == colon) return t.substring(0, colon) to (t.substring(colon + 1).toIntOrNull() ?: 0)
+            return t to 0
+        }
     }
 }

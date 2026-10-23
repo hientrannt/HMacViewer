@@ -129,6 +129,23 @@ jobs:
           path: LinuxViewer/target/release/linuxviewer
           retention-days: 14
 
+  remotecore:
+    name: RemoteCore (Rust)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: RemoteCore
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: RemoteCore
+
+      - name: Run tests
+        run: cargo test --locked
+
   android:
     name: Android app
     runs-on: ubuntu-latest

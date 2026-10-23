@@ -69,9 +69,40 @@ impl Mouse {
     }
 }
 
+/// A handle is either an UltraViewer session or a VNC/RDP one (RemoteCore).
+enum Backend {
+    Ultra(Session),
+    Direct(Direct),
+}
+
+/// VNC/RDP session plus the pointer state the UltraViewer-style calls imply.
+struct Direct {
+    session: remotecore::Session,
+    pointer: Mutex<(u32, u32, u8)>,
+}
+
+fn backend<'a>(handle: jlong) -> Option<&'a Backend> {
+    // SAFETY: handles come from `nativeConnect*` and stay valid until `nativeClose`.
+    (handle != 0).then(|| unsafe { &*(handle as *const Backend) })
+}
+
 fn session<'a>(handle: jlong) -> Option<&'a Session> {
-    // SAFETY: handles come from `nativeConnect` and stay valid until `nativeClose`.
-    (handle != 0).then(|| unsafe { &*(handle as *const Session) })
+    match backend(handle)? { Backend::Ultra(s) => Some(s), Backend::Direct(_) => None }
+}
+
+fn direct<'a>(handle: jlong) -> Option<&'a Direct> {
+    match backend(handle)? { Backend::Direct(d) => Some(d), Backend::Ultra(_) => None }
+}
+
+/// UltraViewer-style virtual keys (RemoteKey on the Kotlin side) as RemoteCore keys.
+fn direct_key(vk: jint) -> Option<remotecore::Key> {
+    use remotecore::Key::*;
+    Some(match vk {
+        0x08 => Backspace, 0x09 => Tab, 0x0d => Enter, 0x1b => Escape, 0x2e => Delete,
+        0x24 => Home, 0x23 => End, 0x21 => PageUp, 0x22 => PageDown,
+        0x25 => Left, 0x26 => Up, 0x27 => Right, 0x28 => Down, 0x5b => Windows,
+        _ => return None,
+    })
 }
 
 fn string(env: &mut JNIEnv, s: &JString) -> String {
@@ -129,12 +160,36 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
         Ok(Session { session, events, frame_dirty, mouse: Mutex::default(), quality: AtomicI32::new(DEFAULT_QUALITY) })
     });
     match result {
-        Ok(s) => Box::into_raw(Box::new(s)) as jlong,
+        Ok(s) => Box::into_raw(Box::new(Backend::Ultra(s))) as jlong,
         Err(e) => {
             *LAST_ERROR.lock().unwrap() = e.to_string();
             0
         }
     }
+}
+
+/// VNC (protocol 1) or RDP (protocol 2) session to `host:port`; events and
+/// frames then come through the same calls as an UltraViewer session.
+#[no_mangle]
+pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_nativeConnectDirect(
+    mut env: JNIEnv, _: JClass, protocol: jint, host: JString, port: jint, username: JString,
+    password: JString, width: jint, height: jint) -> jlong {
+    let protocol = match protocol {
+        1 => remotecore::Protocol::Vnc,
+        2 => remotecore::Protocol::Rdp,
+        _ => {
+            *LAST_ERROR.lock().unwrap() = "Unknown protocol.".into();
+            return 0;
+        }
+    };
+    let params = remotecore::ConnectParams {
+        protocol, host: string(&mut env, &host).trim().to_string(),
+        port: u16::try_from(port).ok().filter(|p| *p > 0).unwrap_or(protocol.default_port()),
+        username: string(&mut env, &username), password: string(&mut env, &password),
+        width: width.max(1) as u32, height: height.max(1) as u32,
+    };
+    let session = remotecore::Session::connect(params);
+    Box::into_raw(Box::new(Backend::Direct(Direct { session, pointer: Mutex::default() }))) as jlong
 }
 
 #[no_mangle]
@@ -149,6 +204,15 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
 #[no_mangle]
 pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_nativePoll(
     env: JNIEnv, _: JClass, handle: jlong) -> jstring {
+    if let Some(d) = direct(handle) {
+        let line = match d.session.poll_event() {
+            None => return std::ptr::null_mut(),
+            Some(remotecore::Event::Status(s)) => format!("S:{s}"),
+            Some(remotecore::Event::Connected { width, height }) => format!("C:{width}:{height}"),
+            Some(remotecore::Event::Closed(reason)) => format!("X:{reason}"),
+        };
+        return env.new_string(line).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut());
+    }
     let Some(s) = session(handle) else { return std::ptr::null_mut() };
     let Some(line) = s.events.lock().unwrap().pop_front() else { return std::ptr::null_mut() };
     if line.starts_with("C:") {
@@ -198,28 +262,43 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
 #[no_mangle]
 pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_nativeDrawFrame(
     env: JNIEnv, _: JClass, handle: jlong, bitmap: jni::objects::JObject) -> jboolean {
+    if let Some(d) = direct(handle) {
+        return match d.session.with_new_frame(|f| draw_pixels(&env, &bitmap, f.width, f.height, &f.pixels)) {
+            Some(true) => JNI_TRUE,
+            Some(false) => { d.session.redraw_later(); JNI_FALSE }
+            None => JNI_FALSE,
+        };
+    }
     let Some(s) = session(handle) else { return JNI_FALSE };
     if !s.frame_dirty.swap(false, Ordering::SeqCst) {
         return JNI_FALSE;
     }
     let Ok(guard) = s.session.screen.lock() else { return JNI_FALSE };
     let Some(renderer) = guard.as_ref() else { return JNI_FALSE };
-    let (width, height) = (renderer.width(), renderer.height());
+    if draw_pixels(&env, &bitmap, renderer.width(), renderer.height(), renderer.pixels()) {
+        JNI_TRUE
+    } else {
+        s.frame_dirty.store(true, Ordering::SeqCst);
+        JNI_FALSE
+    }
+}
+
+/// Writes 0x00RRGGBB pixels into an ARGB_8888 bitmap of exactly that size.
+#[cfg(target_os = "android")]
+fn draw_pixels(env: &JNIEnv, bitmap: &jni::objects::JObject, width: u32, height: u32, pixels: &[u32]) -> bool {
     let raw_env = env.get_raw() as *mut std::ffi::c_void;
     let raw_bitmap = bitmap.as_raw() as *mut std::ffi::c_void;
     let mut info = bitmap::Info::default();
     // SAFETY: env and bitmap are the live JNI arguments of this call.
     if unsafe { bitmap::AndroidBitmap_getInfo(raw_env, raw_bitmap, &mut info) } != 0
         || info.width != width || info.height != height || info.format != bitmap::FORMAT_RGBA_8888 {
-        s.frame_dirty.store(true, Ordering::SeqCst);
-        return JNI_FALSE;
+        return false;
     }
     let mut address = std::ptr::null_mut();
     // SAFETY: as above; the pixels stay locked until the unlock below.
     if unsafe { bitmap::AndroidBitmap_lockPixels(raw_env, raw_bitmap, &mut address) } != 0 || address.is_null() {
-        return JNI_FALSE;
+        return false;
     }
-    let pixels = renderer.pixels();
     for y in 0..height as usize {
         // SAFETY: each row is `stride` bytes inside the locked buffer and holds `width` pixels.
         let row = unsafe {
@@ -233,7 +312,7 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
     }
     // SAFETY: matches the successful lock above.
     unsafe { bitmap::AndroidBitmap_unlockPixels(raw_env, raw_bitmap) };
-    JNI_TRUE
+    true
 }
 
 #[cfg(target_os = "android")]
@@ -272,6 +351,12 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
 #[no_mangle]
 pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_nativePointer(
     _: JNIEnv, _: JClass, handle: jlong, x: jint, y: jint) {
+    if let Some(d) = direct(handle) {
+        let mut p = d.pointer.lock().unwrap();
+        (p.0, p.1) = (x.max(0) as u32, y.max(0) as u32);
+        d.session.pointer(p.0, p.1, p.2);
+        return;
+    }
     let Some(s) = session(handle) else { return };
     let mut m = s.mouse.lock().unwrap();
     m.position = m.remote(x, y);
@@ -284,8 +369,16 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
 #[no_mangle]
 pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_nativeButton(
     _: JNIEnv, _: JClass, handle: jlong, button: jint, pressed: jboolean, x: jint, y: jint) {
-    let Some(s) = session(handle) else { return };
     let pressed = pressed != JNI_FALSE;
+    if let Some(d) = direct(handle) {
+        let bit = match button { 0 => remotecore::BUTTON_LEFT, 1 => remotecore::BUTTON_RIGHT, _ => remotecore::BUTTON_MIDDLE };
+        let mut p = d.pointer.lock().unwrap();
+        (p.0, p.1) = (x.max(0) as u32, y.max(0) as u32);
+        if pressed { p.2 |= bit } else { p.2 &= !bit }
+        d.session.pointer(p.0, p.1, p.2);
+        return;
+    }
+    let Some(s) = session(handle) else { return };
     let (msg, bit) = match (button, pressed) {
         (0, true) => (input::WM_LBUTTONDOWN, 1), (0, false) => (input::WM_LBUTTONUP, 1),
         (1, true) => (input::WM_RBUTTONDOWN, 2), (1, false) => (input::WM_RBUTTONUP, 2),
@@ -305,6 +398,10 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
 #[no_mangle]
 pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_nativeScroll(
     _: JNIEnv, _: JClass, handle: jlong, steps: jfloat) {
+    if let Some(d) = direct(handle) {
+        if steps.is_finite() { d.session.scroll(steps) }
+        return;
+    }
     let Some(s) = session(handle) else { return };
     if !steps.is_finite() {
         return;
@@ -325,6 +422,10 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
 #[no_mangle]
 pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_nativeText(
     mut env: JNIEnv, _: JClass, handle: jlong, text: JString) {
+    if let Some(d) = direct(handle) {
+        d.session.text(&string(&mut env, &text));
+        return;
+    }
     let Some(s) = session(handle) else { return };
     if !s.mouse.lock().unwrap().binary_keyboard {
         return;
@@ -337,6 +438,10 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
 #[no_mangle]
 pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_nativeKey(
     _: JNIEnv, _: JClass, handle: jlong, vk: jint, scan: jint, ch: jint, pressed: jboolean) {
+    if let Some(d) = direct(handle) {
+        if let Some(key) = direct_key(vk) { d.session.key(key, pressed != JNI_FALSE) }
+        return;
+    }
     let Some(s) = session(handle) else { return };
     if !s.mouse.lock().unwrap().binary_keyboard {
         return;
@@ -352,7 +457,9 @@ pub extern "system" fn Java_io_github_hientrannt_hmacviewer_NativeSession_native
     if handle == 0 {
         return;
     }
-    // SAFETY: the handle came from Box::into_raw in nativeConnect and is closed once.
-    let s = unsafe { Box::from_raw(handle as *mut Session) };
-    s.session.close();
+    // SAFETY: the handle came from Box::into_raw in nativeConnect* and is closed once.
+    match *unsafe { Box::from_raw(handle as *mut Backend) } {
+        Backend::Ultra(s) => s.session.close(),
+        Backend::Direct(d) => d.session.close(),
+    }
 }

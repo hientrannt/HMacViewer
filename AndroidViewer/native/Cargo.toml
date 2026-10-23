@@ -13,6 +13,7 @@ crate-type = ["cdylib"]
 [dependencies]
 jni = { version = "0.21", default-features = false }
 linuxviewer = { path = "../../LinuxViewer", default-features = false }
+remotecore = { path = "../../RemoteCore" }
 
 [profile.release]
 lto = "thin"
