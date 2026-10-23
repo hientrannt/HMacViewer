@@ -747,7 +747,7 @@ struct ConnectionView: View {
     private var cardBackground: Color { Color(NSColor.controlBackgroundColor) }
     private func formattedID(_ id: String) -> String {
         guard id.allSatisfy(\.isNumber) else { return id }
-        stride(from: 0, to: id.count, by: 3).map { offset in
+        return stride(from: 0, to: id.count, by: 3).map { offset in
             let start = id.index(id.startIndex, offsetBy: offset)
             return String(id[start..<id.index(start, offsetBy: min(3, id.count - offset))])
         }.joined(separator: " ")
