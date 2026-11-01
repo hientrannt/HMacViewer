@@ -254,6 +254,65 @@ jobs:
             dist/linux/linuxviewer-wayland-amd64.deb
             dist/linux/SHA256SUMS-linux.txt
 
+  windows-release:
+    name: Build & publish Windows app
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Resolve version
+        run: |
+          version="${TAG#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          case "$version" in
+            *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV" ;;
+            *)   echo "PRERELEASE=false" >> "$GITHUB_ENV" ;;
+          esac
+
+      - name: MinGW toolchain
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq mingw-w64
+          rustup target add x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LinuxViewer
+
+      # Viewer only: hosting needs X11/Wayland. Not code-signed, so Windows
+      # SmartScreen asks once ("More info" -> "Run anyway").
+      - name: Build
+        working-directory: LinuxViewer
+        run: cargo build --release --locked --target x86_64-pc-windows-gnu --no-default-features --features desktop
+
+      - name: Package
+        run: |
+          mkdir -p release/HMacViewer
+          cp LinuxViewer/target/x86_64-pc-windows-gnu/release/linuxviewer.exe release/HMacViewer/HMacViewer.exe
+          cp LICENSE release/HMacViewer/LICENSE.txt
+          cd release
+          zip -qr "HMacViewer-Windows-${VERSION}.zip" HMacViewer
+          cp HMacViewer/HMacViewer.exe "HMacViewer-Windows-${VERSION}.exe"
+          ls -l
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ env.PRERELEASE }}
+          fail_on_unmatched_files: true
+          files: |
+            release/HMacViewer-Windows-${{ env.VERSION }}.zip
+            release/HMacViewer-Windows-${{ env.VERSION }}.exe
+
   android-release:
     name: Build & publish Android app
     needs: release
