@@ -87,12 +87,9 @@ jobs:
           sw_vers
           swift --version
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: RemoteCore
-
-      - name: Build VNC/RDP core
-        run: scripts/build_remotecore.sh
+      # No VNC/RDP core here: Xcode 16's linker rejects the prelinked
+      # RemoteCoreKit module ("null objc class data"), so this experimental
+      # build has VNC/RDP turned off. Release builds use the current Xcode.
 
       - name: Package app
         env:
