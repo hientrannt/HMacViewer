@@ -8,6 +8,10 @@ on:
       tag:
         description: "Release tag, e.g. v1.0.0. Built from the selected branch; the tag is created if missing."
         required: true
+      iphone_udids:
+        description: "Optional: iPhone UDIDs to register for the direct-install (Ad Hoc) build, comma-separated. Get one at https://udid.tech on the iPhone."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -494,6 +498,48 @@ jobs:
           printf '%s\n' "$APPSTORE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
           echo "team=$team" >> "$GITHUB_OUTPUT"
           echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      # Adds the iPhones from the workflow form to the developer account, so
+      # the Ad Hoc profile Xcode creates below includes them.
+      - name: Register iPhones
+        if: steps.sign.outputs.enabled == 'true' && github.event.inputs.iphone_udids != ''
+        continue-on-error: true
+        env:
+          UDIDS: ${{ github.event.inputs.iphone_udids }}
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: |
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography 2>/dev/null \
+            || python3 -m pip install --quiet pyjwt cryptography
+          python3 - <<'PY'
+          import json, os, re, time, urllib.error, urllib.request
+          import jwt
+          key = open(os.path.join(os.environ["RUNNER_TEMP"], "AuthKey.p8")).read()
+          token = jwt.encode({"iss": os.environ["APPSTORE_API_ISSUER_ID"], "iat": int(time.time()),
+                              "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
+                             key, algorithm="ES256", headers={"kid": os.environ["APPSTORE_API_KEY_ID"]})
+          def call(method, path, body=None):
+              req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, method=method,
+                  data=json.dumps(body).encode() if body else None,
+                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+              with urllib.request.urlopen(req) as r:
+                  return json.load(r)
+          known = {d["attributes"]["udid"].upper()
+                   for d in call("GET", "/v1/devices?limit=200&filter[platform]=IOS")["data"]}
+          for n, udid in enumerate(u.strip() for u in os.environ["UDIDS"].split(",") if u.strip()):
+              if not re.fullmatch(r"[0-9A-Fa-f-]{24,40}", udid):
+                  print(f"::warning::Skipping {udid!r}: not a UDID")
+                  continue
+              if udid.upper() in known:
+                  print(f"{udid} is already registered")
+                  continue
+              try:
+                  call("POST", "/v1/devices", {"data": {"type": "devices", "attributes": {
+                      "name": f"iPhone {n + 1} (HMacViewer)", "udid": udid, "platform": "IOS"}}})
+                  print(f"Registered {udid}")
+              except urllib.error.HTTPError as e:
+                  print(f"::warning::Could not register {udid}: {e.code} {e.read().decode()[:300]}")
+          PY
 
       - name: Archive signed iOS app
         id: archive
