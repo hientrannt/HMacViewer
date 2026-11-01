@@ -250,7 +250,7 @@ impl Launcher {
         if self.window.is_some() {
             return Ok(());
         }
-        let attrs = Window::default_attributes().with_title("LinuxViewer")
+        let attrs = Window::default_attributes().with_title("HMacViewer")
             .with_inner_size(LogicalSize::new(560.0, 640.0)).with_min_inner_size(LogicalSize::new(420.0, 480.0));
         let window = Rc::new(event_loop.create_window(attrs)?);
         let surface = softbuffer::Context::new(window.clone()).and_then(|c| Surface::new(&c, window.clone()))
@@ -604,7 +604,7 @@ impl Launcher {
         let focus = self.focus;
 
         let mut y = pad;
-        c.text(x, y, "LinuxViewer", TEXT, k + s / 2);
+        c.text(x, y, "HMacViewer", TEXT, k + s / 2);
         y += 14 * s;
 
         // Connect section
@@ -668,47 +668,49 @@ impl Launcher {
             y += 4 * s;
         }
 
-        // Share section
-        c.fill(Rect { x, y, w: width, h: (s / 2).max(1) }, BORDER);
-        y += 6 * s;
-        c.text(x, y, "Share this screen", TEXT, k);
-        y += line + 2 * s;
-        match &self.host {
-            None => {
-                let hint = c.fit("Let a Windows UltraViewer user see or control this computer.", width);
-                c.text(x, y, &hint, MUTED, k);
-                y += line + 2 * s;
-                button(&mut c, &mut hits, x, y, "Share this screen", Widget::Share, false, true);
-                y += field_h + 4 * s;
-            }
-            Some(h) => {
-                let id = h.id.as_deref().map(group_id).unwrap_or_else(|| "...".into());
-                c.text(x, y, &format!("Your ID: {id}"), TEXT, k);
-                y += line;
-                c.text(x, y, &format!("Password: {}", h.password.as_deref().unwrap_or("...")), TEXT, k);
-                y += line + 4 * s;
-                let mut bx = x;
-                if h.request.is_some() {
-                    for (n, label) in ["Allow control", "View only", "Refuse"].iter().enumerate() {
-                        bx += button(&mut c, &mut hits, bx, y, label, Widget::Approve(n as u8), n == 0, true) + 4 * s;
+        // Share section. Hosting needs X11 or Wayland, so it is Linux only.
+        if cfg!(target_os = "linux") {
+            c.fill(Rect { x, y, w: width, h: (s / 2).max(1) }, BORDER);
+            y += 6 * s;
+            c.text(x, y, "Share this screen", TEXT, k);
+            y += line + 2 * s;
+            match &self.host {
+                None => {
+                    let hint = c.fit("Let a Windows UltraViewer user see or control this computer.", width);
+                    c.text(x, y, &hint, MUTED, k);
+                    y += line + 2 * s;
+                    button(&mut c, &mut hits, x, y, "Share this screen", Widget::Share, false, true);
+                    y += field_h + 4 * s;
+                }
+                Some(h) => {
+                    let id = h.id.as_deref().map(group_id).unwrap_or_else(|| "...".into());
+                    c.text(x, y, &format!("Your ID: {id}"), TEXT, k);
+                    y += line;
+                    c.text(x, y, &format!("Password: {}", h.password.as_deref().unwrap_or("...")), TEXT, k);
+                    y += line + 4 * s;
+                    let mut bx = x;
+                    if h.request.is_some() {
+                        for (n, label) in ["Allow control", "View only", "Refuse"].iter().enumerate() {
+                            bx += button(&mut c, &mut hits, bx, y, label, Widget::Approve(n as u8), n == 0, true) + 4 * s;
+                        }
+                        y += field_h + 4 * s;
+                        bx = x;
+                    } else if h.viewer.is_some() {
+                        bx += button(&mut c, &mut hits, bx, y, "End session", Widget::EndViewer, false, true) + 4 * s;
+                        let label = if h.control { "Make view only" } else { "Allow control" };
+                        button(&mut c, &mut hits, bx, y, label, Widget::ToggleControl, false, true);
+                        y += field_h + 4 * s;
+                        bx = x;
                     }
+                    if h.file.is_some() {
+                        bx += button(&mut c, &mut hits, bx, y, "Accept file", Widget::AcceptFile, true, true) + 4 * s;
+                        button(&mut c, &mut hits, bx, y, "Refuse file", Widget::RefuseFile, false, true);
+                        y += field_h + 4 * s;
+                        bx = x;
+                    }
+                    button(&mut c, &mut hits, bx, y, "Stop sharing", Widget::StopSharing, false, true);
                     y += field_h + 4 * s;
-                    bx = x;
-                } else if h.viewer.is_some() {
-                    bx += button(&mut c, &mut hits, bx, y, "End session", Widget::EndViewer, false, true) + 4 * s;
-                    let label = if h.control { "Make view only" } else { "Allow control" };
-                    button(&mut c, &mut hits, bx, y, label, Widget::ToggleControl, false, true);
-                    y += field_h + 4 * s;
-                    bx = x;
                 }
-                if h.file.is_some() {
-                    bx += button(&mut c, &mut hits, bx, y, "Accept file", Widget::AcceptFile, true, true) + 4 * s;
-                    button(&mut c, &mut hits, bx, y, "Refuse file", Widget::RefuseFile, false, true);
-                    y += field_h + 4 * s;
-                    bx = x;
-                }
-                button(&mut c, &mut hits, bx, y, "Stop sharing", Widget::StopSharing, false, true);
-                y += field_h + 4 * s;
             }
         }
         if !self.host_status.is_empty() {

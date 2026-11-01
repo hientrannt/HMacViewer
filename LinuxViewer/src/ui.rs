@@ -306,7 +306,7 @@ impl App {
 
     fn update_title(&self) {
         let Some(w) = &self.window else { return };
-        let mut title = format!("LinuxViewer — {} — {}", self.partner_id, self.state);
+        let mut title = format!("HMacViewer — {} — {}", self.partner_id, self.state);
         if self.encoder.is_some() {
             title += if self.view_only { " — view only" } else if self.control { " — Control ON" } else { " — Control OFF" };
             if self.sound {
@@ -560,7 +560,7 @@ impl App {
             return;
         }
         let attrs = Window::default_attributes()
-            .with_title(format!("LinuxViewer — {}", self.partner_id))
+            .with_title(format!("HMacViewer — {}", self.partner_id))
             .with_inner_size(LogicalSize::new(1600.0, 1000.0));
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Rc::new(w),

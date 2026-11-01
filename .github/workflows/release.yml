@@ -8,6 +8,10 @@ on:
       tag:
         description: "Release tag, e.g. v1.0.0. Built from the selected branch; the tag is created if missing."
         required: true
+      iphone_udids:
+        description: "Optional: iPhone UDIDs to register for the direct-install (Ad Hoc) build, comma-separated. Get one at https://udid.tech on the iPhone."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -254,6 +258,65 @@ jobs:
             dist/linux/linuxviewer-wayland-amd64.deb
             dist/linux/SHA256SUMS-linux.txt
 
+  windows-release:
+    name: Build & publish Windows app
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Resolve version
+        run: |
+          version="${TAG#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          case "$version" in
+            *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV" ;;
+            *)   echo "PRERELEASE=false" >> "$GITHUB_ENV" ;;
+          esac
+
+      - name: MinGW toolchain
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq mingw-w64
+          rustup target add x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LinuxViewer
+
+      # Viewer only: hosting needs X11/Wayland. Not code-signed, so Windows
+      # SmartScreen asks once ("More info" -> "Run anyway").
+      - name: Build
+        working-directory: LinuxViewer
+        run: cargo build --release --locked --target x86_64-pc-windows-gnu --no-default-features --features desktop
+
+      - name: Package
+        run: |
+          mkdir -p release/HMacViewer
+          cp LinuxViewer/target/x86_64-pc-windows-gnu/release/linuxviewer.exe release/HMacViewer/HMacViewer.exe
+          cp LICENSE release/HMacViewer/LICENSE.txt
+          cd release
+          zip -qr "HMacViewer-Windows-${VERSION}.zip" HMacViewer
+          cp HMacViewer/HMacViewer.exe "HMacViewer-Windows-${VERSION}.exe"
+          ls -l
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ env.PRERELEASE }}
+          fail_on_unmatched_files: true
+          files: |
+            release/HMacViewer-Windows-${{ env.VERSION }}.zip
+            release/HMacViewer-Windows-${{ env.VERSION }}.exe
+
   android-release:
     name: Build & publish Android app
     needs: release
@@ -330,3 +393,275 @@ jobs:
             release/HMacViewer-${{ env.VERSION }}.apk
             release/HMacViewer.apk
             release/SHA256SUMS-android.txt
+
+  ios-release:
+    name: Build iPhone/iPad app
+    needs: release
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Resolve version
+        run: |
+          version="${TAG#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "MARKETING=${version%%-*}" >> "$GITHUB_ENV"
+          case "$version" in
+            *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV" ;;
+            *)   echo "PRERELEASE=false" >> "$GITHUB_ENV" ;;
+          esac
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: RemoteCore
+
+      - name: Build VNC/RDP core
+        run: scripts/build_remotecore.sh
+
+      - name: Generate Xcode project
+        working-directory: iOSViewer
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      # Unsigned build for sideloading (Sideloadly/AltStore re-sign it with
+      # the user's Apple ID). Always attached to the release.
+      - name: Build unsigned IPA
+        working-directory: iOSViewer
+        run: |
+          set -o pipefail
+          xcodebuild -project HMacViewer.xcodeproj -scheme HMacViewer -configuration Release \
+            -destination "generic/platform=iOS" -archivePath "$RUNNER_TEMP/unsigned.xcarchive" \
+            MARKETING_VERSION="$MARKETING" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO archive 2>&1 \
+            | grep -E "error:|BUILD|ARCHIVE" | grep -v "^ld: warning" | tail -40
+          mkdir -p "$RUNNER_TEMP/ipa/Payload" ../release
+          cp -R "$RUNNER_TEMP/unsigned.xcarchive/Products/Applications/HMacViewer.app" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/release/HMacViewer-iOS-${VERSION}-unsigned.ipa" Payload)
+          ls -l ../release
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ env.PRERELEASE }}
+          fail_on_unmatched_files: true
+          files: release/HMacViewer-iOS-${{ env.VERSION }}-unsigned.ipa
+
+      # Signed builds. Xcode creates and manages the distribution certificate
+      # and profiles through the App Store Connect API key (role Admin or App
+      # Manager). None of these steps can fail the release.
+      - name: Prepare iOS signing
+        id: sign
+        continue-on-error: true
+        env:
+          APPSTORE_API_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$APPSTORE_API_KEY_P8" ] || [ -z "$APPSTORE_API_KEY_ID" ] || [ -z "$APPSTORE_API_ISSUER_ID" ]; then
+            echo "::warning::No App Store Connect API key; only the unsigned IPA is published."
+            exit 0
+          fi
+          team="$APPLE_TEAM_ID"
+          if [ -z "$team" ] && [ -n "$MACOS_CERTIFICATE_P12" ]; then
+            # The Developer ID certificate's OU is the team ID.
+            echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            for legacy in -legacy ""; do
+              team="$(openssl pkcs12 -in "$RUNNER_TEMP/cert.p12" -nokeys -passin env:MACOS_CERTIFICATE_PASSWORD $legacy 2>/dev/null \
+                | openssl x509 -noout -subject -nameopt multiline 2>/dev/null \
+                | awk -F' = ' '/organizationalUnitName/{print $2; exit}' || true)"
+              [ -n "$team" ] && break
+            done
+            rm -f "$RUNNER_TEMP/cert.p12"
+          fi
+          if [ -z "$team" ]; then
+            echo "::warning::Team ID unknown (add the APPLE_TEAM_ID secret); only the unsigned IPA is published."
+            exit 0
+          fi
+          printf '%s\n' "$APPSTORE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          echo "team=$team" >> "$GITHUB_OUTPUT"
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      # Adds the iPhones from the workflow form to the developer account, so
+      # the Ad Hoc profile Xcode creates below includes them.
+      - name: Register iPhones
+        if: steps.sign.outputs.enabled == 'true' && github.event.inputs.iphone_udids != ''
+        continue-on-error: true
+        env:
+          UDIDS: ${{ github.event.inputs.iphone_udids }}
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: |
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography 2>/dev/null \
+            || python3 -m pip install --quiet pyjwt cryptography
+          python3 - <<'PY'
+          import json, os, re, time, urllib.error, urllib.request
+          import jwt
+          key = open(os.path.join(os.environ["RUNNER_TEMP"], "AuthKey.p8")).read()
+          token = jwt.encode({"iss": os.environ["APPSTORE_API_ISSUER_ID"], "iat": int(time.time()),
+                              "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
+                             key, algorithm="ES256", headers={"kid": os.environ["APPSTORE_API_KEY_ID"]})
+          def call(method, path, body=None):
+              req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, method=method,
+                  data=json.dumps(body).encode() if body else None,
+                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+              with urllib.request.urlopen(req) as r:
+                  return json.load(r)
+          known = {d["attributes"]["udid"].upper()
+                   for d in call("GET", "/v1/devices?limit=200&filter[platform]=IOS")["data"]}
+          for n, udid in enumerate(u.strip() for u in os.environ["UDIDS"].split(",") if u.strip()):
+              if not re.fullmatch(r"[0-9A-Fa-f-]{24,40}", udid):
+                  print(f"::warning::Skipping {udid!r}: not a UDID")
+                  continue
+              if udid.upper() in known:
+                  print(f"{udid} is already registered")
+                  continue
+              try:
+                  call("POST", "/v1/devices", {"data": {"type": "devices", "attributes": {
+                      "name": f"iPhone {n + 1} (HMacViewer)", "udid": udid, "platform": "IOS"}}})
+                  print(f"Registered {udid}")
+              except urllib.error.HTTPError as e:
+                  print(f"::warning::Could not register {udid}: {e.code} {e.read().decode()[:300]}")
+          PY
+
+      - name: Archive signed iOS app
+        id: archive
+        if: steps.sign.outputs.enabled == 'true'
+        continue-on-error: true
+        working-directory: iOSViewer
+        env:
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild -project HMacViewer.xcodeproj -scheme HMacViewer -configuration Release \
+            -destination "generic/platform=iOS" -archivePath "$RUNNER_TEMP/HMacViewer.xcarchive" \
+            DEVELOPMENT_TEAM="${{ steps.sign.outputs.team }}" CODE_SIGN_STYLE=Automatic \
+            MARKETING_VERSION="$MARKETING" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$APPSTORE_API_KEY_ID" -authenticationKeyIssuerID "$APPSTORE_API_ISSUER_ID" \
+            archive 2>&1 | grep -E "error:|BUILD|ARCHIVE" | tail -40
+
+      # Ad Hoc: installs straight onto the iPhones registered under Devices
+      # in the developer account (up to 100 a year), no App Store or TestFlight.
+      - name: Export Ad Hoc IPA
+        id: adhoc
+        if: steps.archive.outcome == 'success'
+        continue-on-error: true
+        env:
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/adhoc.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>release-testing</string>
+            <key>teamID</key><string>${{ steps.sign.outputs.team }}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>compileBitcode</key><false/>
+            <key>thinning</key><string>&lt;none&gt;</string>
+          </dict></plist>
+          PLIST
+          set -o pipefail
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/HMacViewer.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/adhoc.plist" -exportPath "$RUNNER_TEMP/adhoc" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$APPSTORE_API_KEY_ID" -authenticationKeyIssuerID "$APPSTORE_API_ISSUER_ID" 2>&1 | tail -30
+          ipa="$(ls "$RUNNER_TEMP"/adhoc/*.ipa | head -1)"
+          cp "$ipa" "release/HMacViewer-iOS-${VERSION}.ipa"
+          ls -l release
+
+      # Optional: with a DIAWI_TOKEN secret (diawi.com, free), the Ad Hoc IPA
+      # also gets an install link and QR code to open on the iPhone.
+      - name: Install link (Diawi)
+        if: steps.adhoc.outcome == 'success'
+        continue-on-error: true
+        env:
+          DIAWI_TOKEN: ${{ secrets.DIAWI_TOKEN }}
+        run: |
+          if [ -z "$DIAWI_TOKEN" ]; then
+            echo "No DIAWI_TOKEN secret; install the IPA from the release page with Finder or Apple Configurator."
+            exit 0
+          fi
+          job="$(curl -fsS https://upload.diawi.com/ -F token="$DIAWI_TOKEN" \
+            -F file=@"release/HMacViewer-iOS-${VERSION}.ipa" -F find_by_udid=0 -F wall_of_apps=0 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["job"])')"
+          for _ in $(seq 1 30); do
+            sleep 5
+            status="$(curl -fsS "https://upload.diawi.com/status?token=$DIAWI_TOKEN&job=$job")"
+            link="$(printf '%s' "$status" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("link","") if d.get("status")==2000 else "")')"
+            [ -n "$link" ] && break
+          done
+          if [ -z "$link" ]; then echo "::warning::Diawi did not finish: $status"; exit 0; fi
+          echo "::notice title=iPhone install link::$link"
+          echo "IPHONE_LINK=$link" >> "$GITHUB_ENV"
+
+      - name: Publish Ad Hoc IPA
+        if: steps.adhoc.outcome == 'success'
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ env.PRERELEASE }}
+          files: release/HMacViewer-iOS-${{ env.VERSION }}.ipa
+
+      - name: Add the install link to the release notes
+        if: env.IPHONE_LINK != ''
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          append_body: true
+          body: |
+
+            **iPhone install link (Ad Hoc):** ${{ env.IPHONE_LINK }}
+
+      # TestFlight needs an app record for io.github.hientrannt.hmacviewer in
+      # App Store Connect.
+      - name: Upload to TestFlight
+        if: steps.archive.outcome == 'success'
+        continue-on-error: true
+        env:
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${{ steps.sign.outputs.team }}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          PLIST
+          set -o pipefail
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/HMacViewer.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$APPSTORE_API_KEY_ID" -authenticationKeyIssuerID "$APPSTORE_API_ISSUER_ID" 2>&1 | tail -30
+          echo "Uploaded build ${{ github.run_number }}; it appears in TestFlight after Apple processes it."
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"

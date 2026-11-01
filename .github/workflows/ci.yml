@@ -140,6 +140,34 @@ jobs:
           path: LinuxViewer/target/release/linuxviewer
           retention-days: 14
 
+  windows:
+    name: Windows app (Rust, cross-built)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: LinuxViewer
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: MinGW toolchain
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq mingw-w64
+          rustup target add x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LinuxViewer
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-pc-windows-gnu --no-default-features --features desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HMacViewer-windows-${{ github.sha }}
+          path: LinuxViewer/target/x86_64-pc-windows-gnu/release/linuxviewer.exe
+          retention-days: 14
+
   remotecore:
     name: RemoteCore (Rust)
     runs-on: ubuntu-latest

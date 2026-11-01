@@ -1,3 +1,5 @@
+// Windows: open the connect window without a console window behind it.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 //! `linuxviewer connect <ID> [--password P]` | `linuxviewer host` | `linuxviewer id`. OWNER: net.
 
 use linuxviewer::command::CommandConnection;
