@@ -115,10 +115,18 @@ pub fn open(connect_host: &str, port: u16, cert_host: &str) -> Result<(FrameRead
     }
     let config = Arc::new(client_config(cert_host)?);
     let mut last: Option<crate::wire::Error> = None;
-    for addr in resolve_ipv4(connect_host, port)? {
-        match open_addr(addr, config.clone(), cert_host) {
-            Ok(pair) => return Ok(pair),
-            Err(e) => last = Some(e),
+    let addrs = resolve_ipv4(connect_host, port)?;
+    // A busy relay or a flaky mobile link can drop the handshake; one more
+    // round usually gets through.
+    for round in 0..2 {
+        if round > 0 {
+            std::thread::sleep(Duration::from_millis(400));
+        }
+        for &addr in &addrs {
+            match open_addr(addr, config.clone(), cert_host) {
+                Ok(pair) => return Ok(pair),
+                Err(e) => last = Some(e),
+            }
         }
     }
     Err(last.unwrap_or_else(|| "The UltraViewer service address could not be resolved.".into()))

@@ -96,7 +96,9 @@ struct SessionScreen: View {
                     touchpad.toggle(); holder.view.touchpadMode = touchpad
                 }
                 tool("plus.magnifyingglass", "Zoom") { holder.view.zoom = holder.view.zoom > 1.05 ? 1 : 2.5 }
-                tool(model.sharpImage ? "sparkles" : "hare", model.sharpImage ? "Sharp" : "Fast") { model.sharpImage.toggle() }
+                if !model.isDirect {
+                    tool(model.sharpImage ? "sparkles" : "hare", model.sharpImage ? "Sharp" : "Fast") { model.sharpImage.toggle() }
+                }
                 tool(nil, "Esc") { model.key(.escape) }
                 tool(nil, "Tab") { model.key(.tab) }
                 tool("square.grid.2x2", "Win") { model.key(.windows) }

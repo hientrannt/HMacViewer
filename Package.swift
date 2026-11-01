@@ -6,12 +6,20 @@ import PackageDescription
 let minimumMacOS: SupportedPlatform = ProcessInfo.processInfo.environment["MACVIEWER_MIN_MACOS"] == "11"
     ? .macOS(.v11) : .macOS(.v12)
 
+// scripts/build_remotecore.sh builds VNC/RDP support (RemoteCore, Rust); without
+// it RemoteCoreKit compiles with VNC/RDP reported as unavailable.
+let remoteCoreFramework = "RemoteCore/build/RemoteCoreFFI.xcframework"
+let hasRemoteCore = FileManager.default.fileExists(atPath: URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().appendingPathComponent(remoteCoreFramework).path)
+let remoteCoreDependencies: [Target.Dependency] = hasRemoteCore ? ["RemoteCoreFFI"] : []
+
 let package = Package(
     name: "MacViewer",
     defaultLocalization: "en",
     platforms: [minimumMacOS, .iOS(.v16)],
     products: [
         .library(name: "UltraViewerProtocol", targets: ["UltraViewerProtocol"]),
+        .library(name: "RemoteCoreKit", targets: ["RemoteCoreKit"]),
         .executable(name: "MacViewer", targets: ["MacViewer"]),
         .executable(name: "macviewer-mcp", targets: ["macviewer-mcp"]),
     ],
@@ -49,10 +57,17 @@ let package = Package(
         ),
         .target(name: "UltraViewerProtocol", dependencies: ["CZstd", "CG722"],
                 resources: [.copy("Resources/8bit.dat")]),
-        .executableTarget(name: "MacViewer", dependencies: ["UltraViewerProtocol"],
+        .target(name: "RemoteCoreKit", dependencies: remoteCoreDependencies,
+                linkerSettings: [.linkedFramework("CoreFoundation"), .linkedFramework("Security"),
+                                 .linkedFramework("SystemConfiguration"), .linkedLibrary("z")]),
+        .executableTarget(name: "MacViewer", dependencies: ["UltraViewerProtocol", "RemoteCoreKit"],
                           resources: [.process("Resources")]),
         .executableTarget(name: "macviewer-mcp", path: "Sources/MacViewerMCP"),
         .testTarget(name: "UltraViewerProtocolTests", dependencies: ["UltraViewerProtocol"]),
         .testTarget(name: "MacViewerTests", dependencies: ["MacViewer"]),
     ]
 )
+
+if hasRemoteCore {
+    package.targets.append(.binaryTarget(name: "RemoteCoreFFI", path: remoteCoreFramework))
+}

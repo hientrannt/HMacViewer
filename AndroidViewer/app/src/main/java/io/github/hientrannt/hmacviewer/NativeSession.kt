@@ -10,6 +10,9 @@ object NativeSession {
 
     /** Starts a session in the background; 0 on failure (see [nativeLastError]). */
     @JvmStatic external fun nativeConnect(id: String, password: String, width: Int, height: Int): Long
+    /** VNC (1) or RDP (2) session to [host]:[port] (0: default port); 0 if the protocol is unknown. */
+    @JvmStatic external fun nativeConnectDirect(protocol: Int, host: String, port: Int, username: String,
+                                                password: String, width: Int, height: Int): Long
     @JvmStatic external fun nativeLastError(): String
 
     /** Next event or null: `S:status`, `C:width:height`, `V:0|1`, `X:reason`. */

@@ -20,4 +20,7 @@
     <string name="quality_fast">Nhanh</string>
     <string name="quality_sharp">Nét</string>
     <string name="help">Touchpad: rê ngón để di chuột, chạm để nhấp, chạm hai ngón để nhấp phải, giữ rồi rê để kéo thả · Hai ngón: cuộn, chụm để phóng to</string>
+    <string name="user_name">Tên đăng nhập (tài khoản Windows)</string>
+    <string name="address_hint">Địa chỉ máy (IP hoặc tên, có thể thêm :cổng)</string>
+    <string name="enter_address">Nhập địa chỉ máy (và tên đăng nhập nếu dùng RDP).</string>
 </resources>

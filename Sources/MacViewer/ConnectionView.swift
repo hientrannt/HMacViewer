@@ -213,19 +213,35 @@ struct ConnectionView: View {
     private var partnerCard: some View {
         utilityPanel("Connect to Windows", direction: "MAC → WINDOWS", symbol: "pc", color: .blue) {
             VStack(alignment: .leading, spacing: 12) {
+                if !model.isSessionActive {
+                    Picker("Connection", selection: $model.connectionKind) {
+                        ForEach(ConnectionModel.ConnectionKind.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                }
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("Partner ID").font(.callout.weight(.medium))
+                    Text(LocalizedStringKey(model.connectionKind == .ultraViewer ? "Partner ID" : "Computer address"))
+                        .font(.callout.weight(.medium))
                     if model.isSessionActive {
-                        Text(formattedID(model.remoteInfo?.partnerID ?? model.partnerID.filter { $0.isNumber }))
+                        Text(formattedID(model.remoteInfo?.partnerID ?? (model.connectionKind == .ultraViewer
+                            ? model.partnerID.filter { $0.isNumber } : model.partnerID)))
                             .font(.system(size: 20, weight: .medium, design: .monospaced))
                             .lineLimit(1).minimumScaleFactor(0.65)
                             .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
                     } else {
-                        TextField("Windows UltraViewer ID", text: $model.partnerID)
+                        TextField(LocalizedStringKey(model.connectionKind == .ultraViewer ? "Windows UltraViewer ID"
+                                  : "IP address or name, e.g. 192.168.1.20"), text: $model.partnerID)
                             .font(.system(size: 15, design: .monospaced))
                             .textFieldStyle(.roundedBorder).controlSize(.regular).frame(height: 30)
                             .focusOnRequest($focusRequest, equals: .partner)
                             .submitAction { focusRequest = .password }
+                    }
+                }
+                if model.connectionKind == .rdp, !model.isSessionActive {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("User name").font(.callout.weight(.medium))
+                        TextField("Windows user name", text: $model.directUser)
+                            .textFieldStyle(.roundedBorder).controlSize(.regular).frame(height: 30)
                     }
                 }
                 VStack(alignment: .leading, spacing: 7) {
@@ -241,7 +257,7 @@ struct ConnectionView: View {
                             .submitAction { if model.canConnect { model.connect() } }
                     }
                 }
-                if !model.isSessionActive {
+                if !model.isSessionActive, model.connectionKind == .ultraViewer {
                     Toggle("Remember password on this Mac", isOn: Binding(
                         get: { model.rememberPassword }, set: { model.setRememberPassword($0) }))
                         .toggleStyle(.checkbox).font(.callout)
@@ -503,7 +519,9 @@ struct ConnectionView: View {
                                 } else {
                                     Text(formattedID(id)).font(.system(size: 16, weight: .medium, design: .monospaced))
                                         .foregroundColor(.primary)
-                                    Text("Windows computer").font(.caption).foregroundColor(.secondary)
+                                    Text(LocalizedStringKey(id.hasPrefix("vnc://") ? "VNC computer"
+                                         : id.hasPrefix("rdp://") ? "Remote Desktop (RDP)" : "Windows computer"))
+                                        .font(.caption).foregroundColor(.secondary)
                                 }
                             }
                             Spacer()
@@ -728,7 +746,8 @@ struct ConnectionView: View {
 
     private var cardBackground: Color { Color(NSColor.controlBackgroundColor) }
     private func formattedID(_ id: String) -> String {
-        stride(from: 0, to: id.count, by: 3).map { offset in
+        guard id.allSatisfy(\.isNumber) else { return id }
+        return stride(from: 0, to: id.count, by: 3).map { offset in
             let start = id.index(id.startIndex, offsetBy: offset)
             return String(id[start..<id.index(start, offsetBy: min(3, id.count - offset))])
         }.joined(separator: " ")

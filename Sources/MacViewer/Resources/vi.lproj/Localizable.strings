@@ -545,3 +545,15 @@
 "Email" = "Email";
 "Phone" = "Điện thoại";
 "Full screen when viewing another computer" = "Tự động toàn màn hình khi xem máy khác";
+
+/* VNC and RDP */
+"Computer address" = "Địa chỉ máy tính";
+"IP address or name, e.g. 192.168.1.20" = "Địa chỉ IP hoặc tên, ví dụ 192.168.1.20";
+"User name" = "Tên người dùng";
+"Windows user name" = "Tên đăng nhập Windows";
+"VNC computer" = "Máy tính VNC";
+"Remote Desktop (RDP)" = "Remote Desktop (RDP)";
+"VNC and RDP are not included in this build." = "Bản này chưa có VNC và RDP.";
+"Enter the computer's address, for example 192.168.1.20 or 192.168.1.20:5901." = "Nhập địa chỉ máy tính, ví dụ 192.168.1.20 hoặc 192.168.1.20:5901.";
+"Computer audio is unavailable for VNC and RDP connections." = "Âm thanh máy tính không dùng được với kết nối VNC và RDP.";
+"Sign-in failed. Check the user name and password, and that Remote Desktop is turned on." = "Đăng nhập thất bại. Kiểm tra tên người dùng, mật khẩu và Remote Desktop đã bật chưa.";

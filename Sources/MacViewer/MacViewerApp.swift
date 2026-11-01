@@ -13,7 +13,7 @@ struct MacViewerApp: App {
     @AppStorage(AppLanguage.defaultsKey) private var language = AppLanguage.system.rawValue
 
     init() {
-        let model = ConnectionModel(adapter: NativeUltraViewerAdapter())
+        let model = ConnectionModel(adapter: RoutingSessionAdapter(ultraViewer: NativeUltraViewerAdapter()))
         _model = StateObject(wrappedValue: model)
         _agents = StateObject(wrappedValue: AgentBridge(model: model))
     }

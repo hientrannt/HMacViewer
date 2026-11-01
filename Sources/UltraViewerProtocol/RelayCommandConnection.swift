@@ -30,16 +30,29 @@ public enum RelayCommandConnection {
         guard port > 0 else { throw FramedTCPTransport.Error.invalidPort }
         try Task.checkCancellation()
         let addresses = try await resolveIPv4(host: host)
-        let result = try await openCandidates(addresses: addresses, port: port,
-            security: security, initialRequest: initialRequest,
-            expectsHTTPResponse: expectsHTTPResponse, attemptTimeout: attemptTimeout,
-            makeConnection: { FramedTCPTransport(maximumPayloadLength: maximumPayloadLength) },
-            openConnection: { transport, attempt in
-                try await transport.open(host: attempt.address, port: attempt.port,
-                    security: attempt.security, initialRequest: attempt.initialRequest,
-                    expectsHTTPResponse: attempt.expectsHTTPResponse, timeout: attempt.timeout)
-            }, closeConnection: { await $0.close() })
-        return (result.connection, result.stream)
+        // A busy relay or a flaky mobile link can drop the TLS handshake; one
+        // more round over the addresses usually gets through.
+        var lastError: any Swift.Error = Error.noIPv4Addresses
+        for round in 0..<2 {
+            if round > 0 { try await Task.sleep(seconds: 0.4) }
+            do {
+                let result = try await openCandidates(addresses: addresses, port: port,
+                    security: security, initialRequest: initialRequest,
+                    expectsHTTPResponse: expectsHTTPResponse, attemptTimeout: attemptTimeout,
+                    makeConnection: { FramedTCPTransport(maximumPayloadLength: maximumPayloadLength) },
+                    openConnection: { transport, attempt in
+                        try await transport.open(host: attempt.address, port: attempt.port,
+                            security: attempt.security, initialRequest: attempt.initialRequest,
+                            expectsHTTPResponse: attempt.expectsHTTPResponse, timeout: attempt.timeout)
+                    }, closeConnection: { await $0.close() })
+                return (result.connection, result.stream)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
     }
 
     /// IPv4 literals bypass DNS. Blocking getaddrinfo runs on a utility queue;

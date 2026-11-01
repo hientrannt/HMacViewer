@@ -1,9 +1,11 @@
 import CoreGraphics
 import Foundation
+import RemoteCoreKit
 import UltraViewerProtocol
 
-/// One remote session: connects through the relay, publishes frames and
-/// status for the UI, and sends mouse and keyboard input in order.
+/// One remote session: connects through the UltraViewer relay, or directly by
+/// VNC/RDP (RemoteCore), publishes frames and status for the UI, and sends
+/// mouse and keyboard input in order.
 @MainActor
 final class SessionModel: ObservableObject {
     enum Phase: Equatable { case connecting, connected, ended(String) }
@@ -27,8 +29,17 @@ final class SessionModel: ObservableObject {
     private var outbox: [Data] = []
     private var pendingMove: Data?
     private var sending = false
+    /// Set for VNC and RDP sessions; UltraViewer uses `session`.
+    private var direct: DirectSession?
 
+    var isDirect: Bool { direct != nil }
+
+    /// `id` is an UltraViewer partner ID or a `DirectTarget.label` ("vnc://host").
     func connect(id: String, password: String, screenWidth: Int, screenHeight: Int) {
+        if let target = DirectTarget(label: id) {
+            connectDirect(target, password: password, width: screenWidth, height: screenHeight)
+            return
+        }
         reader = Task {
             do {
                 let profile = try RegistrationProfile.loadOrCreate()
@@ -45,8 +56,42 @@ final class SessionModel: ObservableObject {
         }
     }
 
+    private func connectDirect(_ target: DirectTarget, password: String, width: Int, height: Int) {
+        guard DirectSession.isAvailable else { end(String(localized: "VNC and RDP are not included in this build.")); return }
+        let direct = DirectSession(target: target, password: password, width: width, height: height)
+        self.direct = direct
+        reader = Task {
+            while !Task.isCancelled {
+                // Copy the frame off the main thread; it can be several megabytes.
+                let batch = await Task.detached { () -> ([DirectEvent], CGImage?) in
+                    var events: [DirectEvent] = []
+                    while let event = direct.pollEvent() { events.append(event) }
+                    return (events, direct.copyFrame())
+                }.value
+                guard !Task.isCancelled else { return }
+                for event in batch.0 {
+                    switch event {
+                    case let .status(text): status = text
+                    case .connected: phase = .connected
+                    case let .closed(reason):
+                        end(phase == .connected ? String(localized: "The session ended.") : reason)
+                        return
+                    }
+                }
+                if let next = batch.1 { image = next }
+                try? await Task.sleep(nanoseconds: 8_000_000)
+            }
+        }
+    }
+
     func disconnect() {
         reader?.cancel()
+        if let direct {
+            direct.pointer(x: Int(position.x), y: Int(position.y), buttons: 0)
+            direct.close()
+            end(String(localized: "Disconnected."))
+            return
+        }
         let session = session
         Task { await session.close() }
         end(String(localized: "Disconnected."))
@@ -80,7 +125,7 @@ final class SessionModel: ObservableObject {
 
     /// Fast (30) for slower phone links unless the user picked a sharp image.
     private func applyQuality() {
-        guard phase == .connected else { return }
+        guard phase == .connected, direct == nil else { return }
         for message in RemoteControlCommands.qualityPreset(sharpImage ? .quality : .speed) { command(message) }
     }
 
@@ -101,6 +146,7 @@ final class SessionModel: ObservableObject {
 
     func pointer(x: Int, y: Int) {
         position = remote(x, y)
+        if let direct { direct.pointer(x: x, y: y, buttons: UInt8(buttons)); return }
         pendingMove = MouseMessage.move(wParam: flags, x: position.x, y: position.y).encode()
         pump()
     }
@@ -108,6 +154,12 @@ final class SessionModel: ObservableObject {
     /// button: 0 left, 1 right.
     func button(_ button: Int, pressed: Bool, x: Int, y: Int) {
         position = remote(x, y)
+        if let direct {
+            let bit: Int32 = button == 0 ? 1 : 4
+            if pressed { buttons |= bit } else { buttons &= ~bit }
+            direct.pointer(x: x, y: y, buttons: UInt8(buttons))
+            return
+        }
         pendingMove = nil
         enqueue(MouseMessage.move(wParam: flags, x: position.x, y: position.y).encode())
         let bit: Int32 = button == 0 ? 1 : 2
@@ -129,6 +181,7 @@ final class SessionModel: ObservableObject {
         let whole = total.rounded(.towardZero)
         wheelRemainder = total - whole
         guard whole != 0 else { return }
+        if let direct { direct.scroll(whole); return }
         let packed = MouseMessage.packedPosition(x: Int16(truncatingIfNeeded: position.x),
                                                  y: Int16(truncatingIfNeeded: position.y))
         enqueue(MouseMessage.verticalWheel(wParam: MouseMessage.wheelWParam(delta: Int16(whole * 120),
@@ -137,6 +190,7 @@ final class SessionModel: ObservableObject {
 
     /// Text as VK_PACKET key pairs, one UTF-16 unit each.
     func type(_ text: String) {
+        if let direct { direct.text(text); return }
         guard keyboardSupported else { return }
         for unit in text.utf16 where unit >= 0x20 && !(0xd800...0xdfff).contains(unit) {
             enqueue(KeyboardMessage(kind: .keyDown, virtualKey: 0xe7, scanCode: 0, character: unit, capsLockOn: false).encode())
@@ -145,6 +199,11 @@ final class SessionModel: ObservableObject {
     }
 
     func key(_ key: RemoteKey) {
+        if let direct {
+            direct.key(key.direct, down: true)
+            direct.key(key.direct, down: false)
+            return
+        }
         guard keyboardSupported else { return }
         for kind in [KeyboardMessage.Kind.keyDown, .keyUp] {
             enqueue(KeyboardMessage(kind: kind, virtualKey: key.virtualKey, scanCode: key.scanCode,
@@ -191,6 +250,21 @@ enum RemoteKey {
         case .right: 0x27
         case .down: 0x28
         case .windows: 0x5b
+        }
+    }
+
+    var direct: DirectKey {
+        switch self {
+        case .backspace: .backspace
+        case .tab: .tab
+        case .enter: .enter
+        case .escape: .escape
+        case .delete: .delete
+        case .left: .left
+        case .up: .up
+        case .right: .right
+        case .down: .down
+        case .windows: .windows
         }
     }
 

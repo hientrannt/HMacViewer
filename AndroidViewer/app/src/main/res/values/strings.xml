@@ -22,4 +22,7 @@
     <string name="quality_fast">Fast</string>
     <string name="quality_sharp">Sharp</string>
     <string name="help">Touchpad: slide to move the cursor, tap to click, two-finger tap for right click, hold then slide to drag · Two fingers: scroll, pinch to zoom</string>
+    <string name="user_name">User name (Windows account)</string>
+    <string name="address_hint">Address (IP or name, :port optional)</string>
+    <string name="enter_address">Enter the computer\'s address (and user name for RDP).</string>
 </resources>
