@@ -330,3 +330,132 @@ jobs:
             release/HMacViewer-${{ env.VERSION }}.apk
             release/HMacViewer.apk
             release/SHA256SUMS-android.txt
+
+  ios-release:
+    name: Build iPhone/iPad app
+    needs: release
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Resolve version
+        run: |
+          version="${TAG#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "MARKETING=${version%%-*}" >> "$GITHUB_ENV"
+          case "$version" in
+            *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV" ;;
+            *)   echo "PRERELEASE=false" >> "$GITHUB_ENV" ;;
+          esac
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: RemoteCore
+
+      - name: Build VNC/RDP core
+        run: scripts/build_remotecore.sh
+
+      - name: Generate Xcode project
+        working-directory: iOSViewer
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      # Unsigned build for sideloading (Sideloadly/AltStore re-sign it with
+      # the user's Apple ID). Always attached to the release.
+      - name: Build unsigned IPA
+        working-directory: iOSViewer
+        run: |
+          set -o pipefail
+          xcodebuild -project HMacViewer.xcodeproj -scheme HMacViewer -configuration Release \
+            -destination "generic/platform=iOS" -archivePath "$RUNNER_TEMP/unsigned.xcarchive" \
+            MARKETING_VERSION="$MARKETING" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO archive 2>&1 \
+            | grep -E "error:|BUILD|ARCHIVE" | grep -v "^ld: warning" | tail -40
+          mkdir -p "$RUNNER_TEMP/ipa/Payload" ../release
+          cp -R "$RUNNER_TEMP/unsigned.xcarchive/Products/Applications/HMacViewer.app" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/release/HMacViewer-iOS-${VERSION}-unsigned.ipa" Payload)
+          ls -l ../release
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ env.PRERELEASE }}
+          fail_on_unmatched_files: true
+          files: release/HMacViewer-iOS-${{ env.VERSION }}-unsigned.ipa
+
+      # TestFlight: signed with the team's App Store distribution certificate,
+      # created and managed by Xcode through the App Store Connect API key.
+      # Needs an app record for io.github.hientrannt.hmacviewer in App Store
+      # Connect and a key with the Admin or App Manager role. A failure here
+      # does not affect the other downloads.
+      - name: Upload to TestFlight
+        continue-on-error: true
+        working-directory: iOSViewer
+        env:
+          APPSTORE_API_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -o pipefail
+          if [ -z "$APPSTORE_API_KEY_P8" ] || [ -z "$APPSTORE_API_KEY_ID" ] || [ -z "$APPSTORE_API_ISSUER_ID" ]; then
+            echo "::warning::No App Store Connect API key; skipping TestFlight."
+            exit 0
+          fi
+          team="$APPLE_TEAM_ID"
+          if [ -z "$team" ] && [ -n "$MACOS_CERTIFICATE_P12" ]; then
+            # The Developer ID certificate's OU is the team ID.
+            echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            for legacy in -legacy ""; do
+              team="$(openssl pkcs12 -in "$RUNNER_TEMP/cert.p12" -nokeys -passin env:MACOS_CERTIFICATE_PASSWORD $legacy 2>/dev/null \
+                | openssl x509 -noout -subject -nameopt multiline 2>/dev/null \
+                | awk -F' = ' '/organizationalUnitName/{print $2; exit}' || true)"
+              [ -n "$team" ] && break
+            done
+            rm -f "$RUNNER_TEMP/cert.p12"
+          fi
+          if [ -z "$team" ]; then
+            echo "::warning::Team ID unknown (add the APPLE_TEAM_ID secret); skipping TestFlight."
+            exit 0
+          fi
+          key_path="$RUNNER_TEMP/AuthKey_${APPSTORE_API_KEY_ID}.p8"
+          printf '%s\n' "$APPSTORE_API_KEY_P8" > "$key_path"
+          auth=(-allowProvisioningUpdates -authenticationKeyPath "$key_path"
+                -authenticationKeyID "$APPSTORE_API_KEY_ID" -authenticationKeyIssuerID "$APPSTORE_API_ISSUER_ID")
+          xcodebuild -project HMacViewer.xcodeproj -scheme HMacViewer -configuration Release \
+            -destination "generic/platform=iOS" -archivePath "$RUNNER_TEMP/HMacViewer.xcarchive" \
+            DEVELOPMENT_TEAM="$team" CODE_SIGN_STYLE=Automatic \
+            MARKETING_VERSION="$MARKETING" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            "${auth[@]}" archive 2>&1 | grep -E "error:|BUILD|ARCHIVE" | tail -40
+          cat > "$RUNNER_TEMP/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$team</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/HMacViewer.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" -exportPath "$RUNNER_TEMP/export" "${auth[@]}" 2>&1 | tail -40
+          rm -f "$key_path"
+          echo "Uploaded build ${{ github.run_number }} to TestFlight; it appears there after Apple processes it."
