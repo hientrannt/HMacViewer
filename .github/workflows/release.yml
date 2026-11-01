@@ -244,23 +244,21 @@ jobs:
           LINUXVIEWER_VERSION: ${{ env.VERSION }}
         run: scripts/package_linux.sh
 
+      # Adds the files only; the release itself is created by the first job.
       - name: Publish to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          target_commitish: ${{ github.sha }}
-          prerelease: ${{ env.PRERELEASE }}
-          fail_on_unmatched_files: true
-          files: |
-            dist/linux/linuxviewer-${{ env.VERSION }}-x86_64.tar.gz
-            dist/linux/linuxviewer_${{ env.VERSION }}_amd64.deb
-            dist/linux/linuxviewer-x86_64.tar.gz
-            dist/linux/linuxviewer-amd64.deb
-            dist/linux/linuxviewer-wayland-${{ env.VERSION }}-x86_64.tar.gz
-            dist/linux/linuxviewer-wayland_${{ env.VERSION }}_amd64.deb
-            dist/linux/linuxviewer-wayland-x86_64.tar.gz
-            dist/linux/linuxviewer-wayland-amd64.deb
-            dist/linux/SHA256SUMS-linux.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" --clobber --repo "${{ github.repository }}" \
+            "dist/linux/linuxviewer-${{ env.VERSION }}-x86_64.tar.gz" \
+            "dist/linux/linuxviewer_${{ env.VERSION }}_amd64.deb" \
+            "dist/linux/linuxviewer-x86_64.tar.gz" \
+            "dist/linux/linuxviewer-amd64.deb" \
+            "dist/linux/linuxviewer-wayland-${{ env.VERSION }}-x86_64.tar.gz" \
+            "dist/linux/linuxviewer-wayland_${{ env.VERSION }}_amd64.deb" \
+            "dist/linux/linuxviewer-wayland-x86_64.tar.gz" \
+            "dist/linux/linuxviewer-wayland-amd64.deb" \
+            "dist/linux/SHA256SUMS-linux.txt"
 
   windows-release:
     name: Build & publish Windows app
@@ -310,16 +308,14 @@ jobs:
           cp HMacViewer/HMacViewer.exe "HMacViewer-Windows-${VERSION}.exe"
           ls -l
 
+      # Adds the files only; the release itself is created by the first job.
       - name: Publish to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          target_commitish: ${{ github.sha }}
-          prerelease: ${{ env.PRERELEASE }}
-          fail_on_unmatched_files: true
-          files: |
-            release/HMacViewer-Windows-${{ env.VERSION }}.zip
-            release/HMacViewer-Windows-${{ env.VERSION }}.exe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" --clobber --repo "${{ github.repository }}" \
+            "release/HMacViewer-Windows-${{ env.VERSION }}.zip" \
+            "release/HMacViewer-Windows-${{ env.VERSION }}.exe"
 
   android-release:
     name: Build & publish Android app
@@ -387,16 +383,15 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk ../release/HMacViewer.apk
           cd ../release && sha256sum HMacViewer-${VERSION}.apk HMacViewer.apk > SHA256SUMS-android.txt
 
+      # Adds the files only; the release itself is created by the first job.
       - name: Publish to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          prerelease: ${{ env.PRERELEASE }}
-          fail_on_unmatched_files: true
-          files: |
-            release/HMacViewer-${{ env.VERSION }}.apk
-            release/HMacViewer.apk
-            release/SHA256SUMS-android.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" --clobber --repo "${{ github.repository }}" \
+            "release/HMacViewer-${{ env.VERSION }}.apk" \
+            "release/HMacViewer.apk" \
+            "release/SHA256SUMS-android.txt"
 
   ios-release:
     name: Build iPhone/iPad app
@@ -456,14 +451,14 @@ jobs:
           (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/release/HMacViewer-iOS-${VERSION}-unsigned.ipa" Payload)
           ls -l ../release
 
+      # Adds the files only; the release itself is created by the first job.
       - name: Publish to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          target_commitish: ${{ github.sha }}
-          prerelease: ${{ env.PRERELEASE }}
-          fail_on_unmatched_files: true
-          files: release/HMacViewer-iOS-${{ env.VERSION }}-unsigned.ipa
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" --clobber --repo "${{ github.repository }}" \
+            "release/HMacViewer-iOS-${{ env.VERSION }}-unsigned.ipa"
 
       # Signed builds. Xcode creates and manages the distribution certificate
       # and profiles through the App Store Connect API key (role Admin or App
@@ -591,15 +586,15 @@ jobs:
           echo "::notice title=iPhone install link::$link"
           echo "IPHONE_LINK=$link" >> "$GITHUB_ENV"
 
+      # Adds the files only; the release itself is created by the first job.
       - name: Publish Ad Hoc IPA
         if: steps.adhoc.outcome == 'success'
         continue-on-error: true
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          target_commitish: ${{ github.sha }}
-          prerelease: ${{ env.PRERELEASE }}
-          files: release/HMacViewer-iOS-${{ env.VERSION }}.ipa
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" --clobber --repo "${{ github.repository }}" \
+            "release/HMacViewer-iOS-${{ env.VERSION }}.ipa"
 
       - name: Add the install link to the release notes
         if: env.IPHONE_LINK != ''
