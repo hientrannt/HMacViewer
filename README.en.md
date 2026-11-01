@@ -247,6 +247,29 @@ cargo build --release
 ./target/release/linuxviewer
 ```
 
+## VNC and Remote Desktop (RDP)
+
+Besides UltraViewer, the Mac, iPhone/iPad and Android apps connect directly to
+computers running **VNC** (TightVNC, RealVNC, x11vnc…) or Windows **Remote Desktop**
+(Pro editions). Pick **VNC** or **RDP** on the connect screen, enter the address
+(for example `192.168.1.20` or `192.168.1.20:5901`) and password; RDP also needs the
+Windows user name (`DOMAIN\user` works). The connection goes straight to that
+computer, with no relay; over the internet, use a VPN such as Tailscale. The engine
+is `RemoteCore/` (Rust).
+
+## Windows (experimental)
+
+Download `HMacViewer-Windows-<version>.exe` from Releases and run it; nothing to
+install. The Windows app **controls other computers** by UltraViewer ID. It is not
+code-signed, so the first launch asks: click **More info → Run anyway**.
+
+## iPhone and iPad
+
+- **TestFlight**: each release is uploaded to TestFlight; install the TestFlight app
+  and open the invitation to install HMacViewer.
+- **Ad Hoc**: `HMacViewer-iOS-<version>.ipa` installs directly on the iPhones whose
+  UDIDs were registered when running Release (drag it onto the iPhone in Finder).
+
 ## Project layout
 
 ```

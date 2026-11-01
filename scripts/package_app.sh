@@ -33,12 +33,28 @@ build_number="${MACVIEWER_BUILD_NUMBER:-5}"
 minimum_system_version="${MACVIEWER_MIN_MACOS:-12}.0"
 build_flags=(--configuration "$configuration")
 if [[ "${MACVIEWER_UNIVERSAL:-0}" == "1" ]]; then
-  build_flags+=(--arch arm64 --arch x86_64)
+  # One native build per architecture, then lipo. `--arch arm64 --arch
+  # x86_64` switches SwiftPM to the Xcode build system, which cannot link the
+  # RemoteCoreFFI static library ("library not found for -lremotecore").
+  binary_directory="$project_root/.build/universal-$configuration"
+  rm -rf "$binary_directory"
+  mkdir -p "$binary_directory"
+  arch_directories=()
+  for arch in arm64 x86_64; do
+    arch_flags=("${build_flags[@]}" --triple "$arch-apple-macosx$minimum_system_version")
+    swift build "${arch_flags[@]}" --product MacViewer
+    swift build "${arch_flags[@]}" --product macviewer-mcp
+    arch_directories+=("$(swift build "${arch_flags[@]}" --show-bin-path)")
+  done
+  for product in MacViewer macviewer-mcp; do
+    lipo -create "${arch_directories[1]}/$product" "${arch_directories[2]}/$product" -output "$binary_directory/$product"
+  done
+  cp -R "${arch_directories[1]}/MacViewer_MacViewer.bundle" "$binary_directory/"
+else
+  swift build "${build_flags[@]}" --product MacViewer
+  swift build "${build_flags[@]}" --product macviewer-mcp
+  binary_directory="$(swift build "${build_flags[@]}" --show-bin-path)"
 fi
-
-swift build "${build_flags[@]}" --product MacViewer
-swift build "${build_flags[@]}" --product macviewer-mcp
-binary_directory="$(swift build "${build_flags[@]}" --show-bin-path)"
 app_directory="$project_root/dist/HMacViewer.app"
 mkdir -p "$app_directory/Contents/MacOS" "$app_directory/Contents/Resources"
 icon_directory="$project_root/.build/HMacViewer.iconset"

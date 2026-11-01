@@ -50,11 +50,16 @@ jobs:
       - name: Run tests
         run: swift test --parallel
 
+      # Universal, like the release, so the RemoteCore link is covered for
+      # both architectures.
       - name: Package app
         env:
           MACVIEWER_SIGNING_IDENTITY: "-"
+          MACVIEWER_UNIVERSAL: "1"
           MACVIEWER_BUILD_NUMBER: ${{ github.run_number }}
-        run: scripts/package_app.sh release
+        run: |
+          scripts/package_app.sh release
+          lipo -info dist/HMacViewer.app/Contents/MacOS/MacViewer
 
       - name: Zip app
         run: ditto -c -k --sequesterRsrc --keepParent dist/HMacViewer.app dist/HMacViewer.zip

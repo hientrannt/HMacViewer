@@ -264,6 +264,28 @@ cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../app/src/main/jniLibs build
 cd .. && ./gradlew assembleRelease
 ```
 
+## VNC và Remote Desktop (RDP)
+
+Ngoài UltraViewer, ứng dụng Mac, iPhone/iPad và Android kết nối được thẳng tới
+máy chạy **VNC** (TightVNC, RealVNC, x11vnc…) hoặc **Remote Desktop** của Windows
+(bản Pro trở lên). Chọn **VNC** hoặc **RDP** ở màn hình kết nối, nhập địa chỉ máy
+(ví dụ `192.168.1.20` hoặc `192.168.1.20:5901`) và mật khẩu; RDP cần thêm tên đăng
+nhập Windows (`DOMAIN\user` cũng được). Kết nối đi thẳng tới máy đó, không qua máy
+chủ trung gian; từ xa thì dùng VPN (ví dụ Tailscale). Lõi là `RemoteCore/` (Rust).
+
+## Windows (thử nghiệm)
+
+Tải `HMacViewer-Windows-<phiên bản>.exe` ở trang Releases và chạy thẳng, không
+cần cài. Bản Windows dùng để **điều khiển máy khác** qua UltraViewer ID. Tệp chưa
+được ký số nên lần đầu Windows hỏi: bấm **More info → Run anyway**.
+
+## iPhone và iPad
+
+- **TestFlight**: mỗi bản phát hành được tải lên TestFlight; cài app TestFlight
+  rồi mở lời mời để cài HMacViewer.
+- **Ad Hoc**: `HMacViewer-iOS-<phiên bản>.ipa` cài thẳng lên các iPhone đã đăng ký
+  UDID khi chạy Release (kéo vào iPhone trong Finder).
+
 ## Cấu trúc thư mục
 
 ```
