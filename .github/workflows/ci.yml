@@ -61,6 +61,18 @@ jobs:
           scripts/package_app.sh release
           lipo -info dist/HMacViewer.app/Contents/MacOS/MacViewer
 
+      # The packaged app must start: v1.2.0 crashed at launch because a
+      # resource lookup only worked from the build folder.
+      - name: Launch packaged app
+        run: |
+          dist/HMacViewer.app/Contents/MacOS/MacViewer &
+          pid=$!
+          sleep 15
+          if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid"; echo "::error::HMacViewer exited during launch (status $?)"; exit 1
+          fi
+          kill "$pid"
+
       - name: Zip app
         run: ditto -c -k --sequesterRsrc --keepParent dist/HMacViewer.app dist/HMacViewer.zip
 

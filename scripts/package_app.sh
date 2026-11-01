@@ -65,6 +65,8 @@ for language in en vi; do
   cp "Sources/MacViewer/Resources/$language.lproj/Localizable.strings" "$app_directory/Contents/Resources/$language.lproj/Localizable.strings"
 done
 cp -R "$binary_directory/MacViewer_MacViewer.bundle" "$app_directory/Contents/Resources/"
+# UltraViewerScreenDictionary reads this through Bundle.main in the app.
+cp Sources/UltraViewerProtocol/Resources/8bit.dat "$app_directory/Contents/Resources/8bit.dat"
 mkdir -p "$app_directory/Contents/Resources/Licenses/MacViewer"
 cp LICENSE "$app_directory/Contents/Resources/Licenses/MacViewer/LICENSE"
 mkdir -p "$app_directory/Contents/Resources/Licenses/Zstandard"

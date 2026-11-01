@@ -12,10 +12,18 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     static var current: AppLanguage {
         AppLanguage(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "system") ?? .system
     }
+    /// In the packaged app the catalogs are in Contents/Resources. Bundle.module
+    /// is only for `swift run` and tests: its accessor crashes when the
+    /// SwiftPM resource bundle is not next to the app (native builds look in
+    /// the .app root, where a signed app cannot hold it).
+    private static var localizationBundles: [Bundle] {
+        Bundle.main.bundleURL.pathExtension == "app" ? [Bundle.main] : [Bundle.main, Bundle.module]
+    }
+
     static func localized(_ key: String, language: AppLanguage = current) -> String {
         let identifier = language == .system
             ? (Locale.preferredLanguages.first?.hasPrefix("vi") == true ? "vi" : "en") : language.rawValue
-        for source in [Bundle.main, Bundle.module] {
+        for source in localizationBundles {
             if let path = source.path(forResource: identifier, ofType: "lproj"), let bundle = Bundle(path: path) {
                 let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
                 if value != key { return value }
