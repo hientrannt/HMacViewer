@@ -31,6 +31,7 @@ struct SessionScreen: View {
     @StateObject private var holder = ScreenHolder()
     @State private var showToolbar = true
     @State private var touchpad = true
+    @State private var fill = UserDefaults.standard.object(forKey: "fillScreen") as? Bool ?? true
     @State private var confirmDisconnect = false
 
     var body: some View {
@@ -65,8 +66,8 @@ struct SessionScreen: View {
                           screenWidth: Int(max(size.width, size.height)), screenHeight: Int(min(size.width, size.height)))
         }
         .onChange(of: model.phase) { phase in
-            // On a phone a whole desktop is tiny: start zoomed in around the cursor.
-            if phase == .connected, holder.view.zoom == 1, UIDevice.current.userInterfaceIdiom == .phone {
+            // Fitted on a phone a whole desktop is tiny: start zoomed in around the cursor.
+            if phase == .connected, !fill, holder.view.zoom == 1, UIDevice.current.userInterfaceIdiom == .phone {
                 holder.view.zoom = 2
             }
         }
@@ -94,6 +95,9 @@ struct SessionScreen: View {
                 }
                 tool(touchpad ? "rectangle.and.hand.point.up.left" : "hand.tap", touchpad ? "Touchpad" : "Direct touch") {
                     touchpad.toggle(); holder.view.touchpadMode = touchpad
+                }
+                tool(fill ? "rectangle.inset.filled" : "rectangle.arrowtriangle.2.inward", fill ? "Fill" : "Fit") {
+                    fill.toggle(); holder.view.fillScreen = fill
                 }
                 tool("plus.magnifyingglass", "Zoom") { holder.view.zoom = holder.view.zoom > 1.05 ? 1 : 2.5 }
                 if !model.isDirect {
