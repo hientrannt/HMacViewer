@@ -7,12 +7,11 @@ public enum UltraViewerScreenDictionary {
     public enum Error: Swift.Error { case missingResource, unexpectedResource }
 
     public static func load() throws -> Data {
-        let url: URL?
-        if Bundle.main.bundleURL.pathExtension == "app" {
-            url = Bundle.main.url(forResource: "8bit", withExtension: "dat")
-        } else {
-            url = Bundle.module.url(forResource: "8bit", withExtension: "dat")
-        }
+        // The packaged Mac app copies the file into Contents/Resources. The iOS
+        // app (built by Xcode) keeps it in the package's resource bundle, which
+        // Bundle.module finds; SwiftPM command-line builds use Bundle.module too.
+        let url = Bundle.main.url(forResource: "8bit", withExtension: "dat")
+            ?? Bundle.module.url(forResource: "8bit", withExtension: "dat")
         guard let url else { throw Error.missingResource }
         let data = try Data(contentsOf: url)
         guard data.count == 112_640,
