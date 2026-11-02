@@ -25,4 +25,6 @@
     <string name="user_name">User name (Windows account)</string>
     <string name="address_hint">Address (IP or name, :port optional)</string>
     <string name="enter_address">Enter the computer\'s address (and user name for RDP).</string>
+    <string name="fill_screen">⛶ Fill</string>
+    <string name="fit_screen">▣ Fit</string>
 </resources>

@@ -2,6 +2,7 @@ package io.github.hientrannt.hmacviewer
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Build
@@ -53,6 +54,16 @@ class SessionActivity : Activity(), RemoteInputSink {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Draw under the camera cutout too, so the remote screen uses every pixel.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
         val dp = resources.displayMetrics.density
         screen = RemoteScreenView(this, this)
         status = TextView(this).apply {
@@ -75,6 +86,15 @@ class SessionActivity : Activity(), RemoteInputSink {
         modeButton = tool(getString(R.string.mode_touchpad)) {
             screen.touchpadMode = !screen.touchpadMode
             modeButton.text = getString(if (screen.touchpadMode) R.string.mode_touchpad else R.string.mode_direct)
+        }
+        val prefs = getSharedPreferences("session", MODE_PRIVATE)
+        screen.fillScreen = prefs.getBoolean("fillScreen", true)
+        fun fillLabel() = getString(if (screen.fillScreen) R.string.fill_screen else R.string.fit_screen)
+        lateinit var fillButton: Button
+        fillButton = tool(fillLabel()) {
+            screen.fillScreen = !screen.fillScreen
+            prefs.edit().putBoolean("fillScreen", screen.fillScreen).apply()
+            fillButton.text = fillLabel()
         }
         tool("🔍 " + getString(R.string.zoom)) { screen.zoom = if (screen.zoom > 1.05f) 1f else 2.5f }
         lateinit var qualityButton: Button
@@ -144,7 +164,7 @@ class SessionActivity : Activity(), RemoteInputSink {
                         screen.bitmap = frameBitmap
                     }
                     // On a phone a whole desktop is tiny: start zoomed in around the cursor.
-                    if (!zoomedOnce && resources.configuration.smallestScreenWidthDp < 600) {
+                    if (!zoomedOnce && !screen.fillScreen && resources.configuration.smallestScreenWidthDp < 600) {
                         zoomedOnce = true
                         screen.zoom = 2f
                     }
@@ -166,6 +186,13 @@ class SessionActivity : Activity(), RemoteInputSink {
             window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                 or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
         }
+    }
+
+    // Folding or unfolding keeps the session (see configChanges in the
+    // manifest); hide the system bars again on the new screen.
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        enterImmersive()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

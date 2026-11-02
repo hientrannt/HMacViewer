@@ -26,3 +26,5 @@
 "Enter the computer's address and password." = "Nhập địa chỉ và mật khẩu của máy tính.";
 "VNC and RDP are not included in this build." = "Bản này chưa có VNC và RDP.";
 "Sign-in failed. Check the user name and password, and that Remote Desktop is turned on." = "Đăng nhập thất bại. Kiểm tra tên người dùng, mật khẩu và Remote Desktop đã bật chưa.";
+"Fill" = "Đầy màn hình";
+"Fit" = "Vừa màn hình";

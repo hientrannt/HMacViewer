@@ -49,7 +49,11 @@ class RemoteScreenView(context: Context, private val sink: RemoteInputSink) : Vi
         }
 
     var touchpadMode = true
-    /** Zoom over the fitted size, 1 to 6. */
+    /** Fill covers the whole display, cropping the desktop (foldables, tall
+     *  phones); off fits it inside with black bars. */
+    var fillScreen = true
+        set(value) { field = value; followCursor(); invalidate() }
+    /** Zoom over the fitted or filled size, 1 to 6. */
     var zoom = 1f
         set(value) { field = value.coerceIn(1f, MAX_ZOOM); followCursor(); invalidate() }
 
@@ -99,7 +103,11 @@ class RemoteScreenView(context: Context, private val sink: RemoteInputSink) : Vi
         isFocusableInTouchMode = true
     }
 
-    private fun scale(b: Bitmap) = min(width / b.width.toFloat(), height / b.height.toFloat()) * zoom
+    private fun scale(b: Bitmap): Float {
+        val x = width / b.width.toFloat()
+        val y = height / b.height.toFloat()
+        return (if (fillScreen) max(x, y) else min(x, y)) * zoom
+    }
     private fun originX(b: Bitmap) = (width - b.width * scale(b)) / 2 + panX
     private fun originY(b: Bitmap) = (height - b.height * scale(b)) / 2 + panY
 
@@ -147,7 +155,9 @@ class RemoteScreenView(context: Context, private val sink: RemoteInputSink) : Vi
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        clampPan()
+        // Folding or unfolding the phone resizes the view: keep the cursor in sight.
+        followCursor()
+        invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {

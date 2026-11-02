@@ -26,3 +26,5 @@
 "Enter the computer's address and password." = "Enter the computer's address and password.";
 "VNC and RDP are not included in this build." = "VNC and RDP are not included in this build.";
 "Sign-in failed. Check the user name and password, and that Remote Desktop is turned on." = "Sign-in failed. Check the user name and password, and that Remote Desktop is turned on.";
+"Fill" = "Fill";
+"Fit" = "Fit";

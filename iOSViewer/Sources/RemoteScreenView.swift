@@ -23,6 +23,14 @@ final class RemoteScreenView: UIView, UIKeyInput {
         }
     }
     var touchpadMode = true
+    /// Fill crops the remote desktop to cover the whole display (foldables and
+    /// tall phones); off fits it inside with black bars.
+    var fillScreen = UserDefaults.standard.object(forKey: "fillScreen") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(fillScreen, forKey: "fillScreen")
+            followCursor(); layoutScreen()
+        }
+    }
     var zoom: CGFloat = 1 {
         didSet { zoom = min(max(zoom, 1), Self.maxZoom); followCursor(); layoutScreen() }
     }
@@ -85,7 +93,8 @@ final class RemoteScreenView: UIView, UIKeyInput {
     private var scale: CGFloat {
         let size = imageSize
         guard size.width > 0, size.height > 0 else { return 1 }
-        return min(bounds.width / size.width, bounds.height / size.height) * zoom
+        let x = bounds.width / size.width, y = bounds.height / size.height
+        return (fillScreen ? max(x, y) : min(x, y)) * zoom
     }
 
     private var origin: CGPoint {

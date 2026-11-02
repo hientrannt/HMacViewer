@@ -23,4 +23,6 @@
     <string name="user_name">Tên đăng nhập (tài khoản Windows)</string>
     <string name="address_hint">Địa chỉ máy (IP hoặc tên, có thể thêm :cổng)</string>
     <string name="enter_address">Nhập địa chỉ máy (và tên đăng nhập nếu dùng RDP).</string>
+    <string name="fill_screen">⛶ Đầy màn hình</string>
+    <string name="fit_screen">▣ Vừa màn hình</string>
 </resources>
