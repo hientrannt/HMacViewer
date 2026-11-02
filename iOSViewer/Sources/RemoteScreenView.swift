@@ -94,7 +94,14 @@ final class RemoteScreenView: UIView, UIKeyInput {
         let size = imageSize
         guard size.width > 0, size.height > 0 else { return 1 }
         let x = bounds.width / size.width, y = bounds.height / size.height
-        return (fillScreen ? max(x, y) : min(x, y)) * zoom
+        return (fills ? max(x, y) : min(x, y)) * zoom
+    }
+
+    /// Fill only when the display and the desktop face the same way: a
+    /// landscape desktop filled onto a portrait phone would show a third of it.
+    private var fills: Bool {
+        let size = imageSize
+        return fillScreen && (bounds.width >= bounds.height) == (size.width >= size.height)
     }
 
     private var origin: CGPoint {
