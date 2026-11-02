@@ -106,7 +106,10 @@ class RemoteScreenView(context: Context, private val sink: RemoteInputSink) : Vi
     private fun scale(b: Bitmap): Float {
         val x = width / b.width.toFloat()
         val y = height / b.height.toFloat()
-        return (if (fillScreen) max(x, y) else min(x, y)) * zoom
+        // Fill only when the display and the desktop face the same way: a
+        // landscape desktop filled onto a portrait screen would show a third of it.
+        val fills = fillScreen && (width >= height) == (b.width >= b.height)
+        return (if (fills) max(x, y) else min(x, y)) * zoom
     }
     private fun originX(b: Bitmap) = (width - b.width * scale(b)) / 2 + panX
     private fun originY(b: Bitmap) = (height - b.height * scale(b)) / 2 + panY
